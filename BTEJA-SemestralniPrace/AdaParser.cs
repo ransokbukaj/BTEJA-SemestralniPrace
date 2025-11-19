@@ -2538,11 +2538,11 @@ public partial class AdaParser : Parser {
 		[System.Diagnostics.DebuggerNonUserCode] public StringLiteralContext stringLiteral() {
 			return GetRuleContext<StringLiteralContext>(0);
 		}
-		[System.Diagnostics.DebuggerNonUserCode] public VariableContext variable() {
-			return GetRuleContext<VariableContext>(0);
-		}
 		[System.Diagnostics.DebuggerNonUserCode] public FunctionCallContext functionCall() {
 			return GetRuleContext<FunctionCallContext>(0);
+		}
+		[System.Diagnostics.DebuggerNonUserCode] public VariableContext variable() {
+			return GetRuleContext<VariableContext>(0);
 		}
 		[System.Diagnostics.DebuggerNonUserCode] public ExpressionContext expression() {
 			return GetRuleContext<ExpressionContext>(0);
@@ -2606,14 +2606,14 @@ public partial class AdaParser : Parser {
 				EnterOuterAlt(_localctx, 4);
 				{
 				State = 348;
-				variable();
+				functionCall();
 				}
 				break;
 			case 5:
 				EnterOuterAlt(_localctx, 5);
 				{
 				State = 349;
-				functionCall();
+				variable();
 				}
 				break;
 			case 6:
@@ -3000,7 +3000,7 @@ public partial class AdaParser : Parser {
 		0,0,0,336,63,1,0,0,0,337,335,1,0,0,0,338,339,7,3,0,0,339,65,1,0,0,0,340,
 		343,3,68,34,0,341,342,5,42,0,0,342,344,3,68,34,0,343,341,1,0,0,0,343,344,
 		1,0,0,0,344,67,1,0,0,0,345,357,3,72,36,0,346,357,3,74,37,0,347,357,3,76,
-		38,0,348,357,3,34,17,0,349,357,3,70,35,0,350,351,5,8,0,0,351,352,3,52,
+		38,0,348,357,3,70,35,0,349,357,3,34,17,0,350,351,5,8,0,0,351,352,3,52,
 		26,0,352,353,5,9,0,0,353,357,1,0,0,0,354,355,5,43,0,0,355,357,3,68,34,
 		0,356,345,1,0,0,0,356,346,1,0,0,0,356,347,1,0,0,0,356,348,1,0,0,0,356,
 		349,1,0,0,0,356,350,1,0,0,0,356,354,1,0,0,0,357,69,1,0,0,0,358,359,3,78,

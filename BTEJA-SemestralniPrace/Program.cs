@@ -16,15 +16,15 @@ namespace BTEJA_SemestralniPrace
             // Pokud je zadán konkrétní soubor
             if (args.Length > 0)
             {
-                AnalyzeSingleFile(args[0]);
+                TestSingleFile(args[0]);
                 return;
             }
 
             // Jinak testuj všechny příklady
-            TestAllExamples();
+            TestAllFiles();
         }
 
-        static void AnalyzeSingleFile(string filePath)
+        static void TestSingleFile(string filePath)
         {
             Console.WriteLine($"Analýza souboru: {filePath}");
 
@@ -44,7 +44,7 @@ namespace BTEJA_SemestralniPrace
                 Console.ForegroundColor = ConsoleColor.Green;
                 Console.WriteLine("ÚSPĚCH");
                 Console.ResetColor();
-                Console.WriteLine("Frontend zpracoval soubor bez chyb:");
+                Console.WriteLine("Frontend zpracoval soubor bez chyb");
             }
             else
             {
@@ -59,7 +59,7 @@ namespace BTEJA_SemestralniPrace
             }
         }
 
-        static void TestAllExamples()
+        static void TestAllFiles()
         {
             Console.WriteLine("Testování všech příkladů");
             Console.WriteLine();
@@ -67,9 +67,9 @@ namespace BTEJA_SemestralniPrace
             // Najdi všechny .ada soubory
             string[] exampleFiles;
 
-            if (Directory.Exists("examples"))
+            if (Directory.Exists("Examples"))
             {
-                exampleFiles = Directory.GetFiles("examples", "*.ada");
+                exampleFiles = Directory.GetFiles("Examples", "*.ada");
             }
             else
             {
@@ -82,7 +82,7 @@ namespace BTEJA_SemestralniPrace
                 Console.WriteLine("Nenalezeny žádné .ada soubory!");
                 Console.ResetColor();
                 Console.WriteLine("Hledané umístění:");
-                Console.WriteLine("- ./examples/*.ada");
+                Console.WriteLine("- ./Examples/*.ada");
                 Console.WriteLine("- ./*.ada");
                 return;
             }
