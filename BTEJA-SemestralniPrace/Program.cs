@@ -11,16 +11,12 @@ namespace BTEJA_SemestralniPrace
     {
         static void Main(string[] args)
         {
-            Console.OutputEncoding = System.Text.Encoding.UTF8;
-
-            // Pokud je zadán konkrétní soubor
+            Console.OutputEncoding = Encoding.UTF8;
             if (args.Length > 0)
             {
                 TestSingleFile(args[0]);
                 return;
             }
-
-            // Jinak testuj všechny příklady
             TestAllFiles();
         }
 
@@ -64,7 +60,6 @@ namespace BTEJA_SemestralniPrace
             Console.WriteLine("Testování všech příkladů");
             Console.WriteLine();
 
-            // Najdi všechny .ada soubory
             string[] exampleFiles;
 
             if (Directory.Exists("Examples"))
@@ -87,7 +82,6 @@ namespace BTEJA_SemestralniPrace
                 return;
             }
 
-            // Seřaď soubory podle jména
             Array.Sort(exampleFiles);
 
             int totalTests = exampleFiles.Length;
@@ -97,7 +91,6 @@ namespace BTEJA_SemestralniPrace
             Console.WriteLine($"Nalezeno {totalTests} příkladů:");
             Console.WriteLine();
 
-            // Testuj každý příklad
             for (int i = 0; i < exampleFiles.Length; i++)
             {
                 string filePath = exampleFiles[i];
@@ -130,7 +123,6 @@ namespace BTEJA_SemestralniPrace
                 Console.WriteLine();
             }
 
-            // Výsledky
             Console.WriteLine("VÝSLEDKY TESTOVÁNÍ");
             Console.WriteLine($"Celkem testů: {totalTests}");
 
