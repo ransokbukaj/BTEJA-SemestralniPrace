@@ -32,26 +32,48 @@ procedure Recursive_Array_Operations is
         end if;
     end Factorial;
     
-    -- Rekurzivní procedura pro vyplnění 3D pole
-    procedure Fill_Cube_Recursive(arr : in out Cube_Array; 
-                                   x, y, z : Integer; 
-                                   value : Integer) is
-        next_value : Integer;
-        
-        -- Vnořená procedura pro validaci indexů
-        procedure Validate_Indices(ix, iy, iz : Integer; out valid : Integer) is
-        begin
-            if ix >= 1 and ix <= 4 and iy >= 1 and iy <= 4 and iz >= 1 and iz <= 4 then
-                valid := 1;
+    -- Funkce pro validaci indexů
+    function Validate_Indices(ix : Integer; iy : Integer; iz : Integer) return Integer is
+        valid : Integer;
+    begin
+        if ix >= 1 then
+            if ix <= 4 then
+                if iy >= 1 then
+                    if iy <= 4 then
+                        if iz >= 1 then
+                            if iz <= 4 then
+                                valid := 1;
+                            else
+                                valid := 0;
+                            end if;
+                        else
+                            valid := 0;
+                        end if;
+                    else
+                        valid := 0;
+                    end if;
+                else
+                    valid := 0;
+                end if;
             else
                 valid := 0;
             end if;
-        end Validate_Indices;
-        
+        else
+            valid := 0;
+        end if;
+        return valid;
+    end Validate_Indices;
+    
+    -- Rekurzivní procedura pro vyplnění 3D pole
+    procedure Fill_Cube_Recursive(arr : in out Cube_Array; 
+                                   x : Integer; 
+                                   y : Integer; 
+                                   z : Integer; 
+                                   value : Integer) is
+        next_value : Integer;
         is_valid : Integer;
-        
     begin
-        Validate_Indices(x, y, z, is_valid);
+        is_valid := Validate_Indices(x, y, z);
         
         if is_valid = 0 then
             return;
@@ -87,29 +109,32 @@ procedure Recursive_Array_Operations is
         return result;
     end Convert_Cube_To_Real;
     
+    -- Rekurzivní funkce pro sčítání v jedné rovině
+    function Sum_Plane(arr : Cube_Array; x : Integer; y1 : Integer; z1 : Integer; y2 : Integer; z2 : Integer) return Integer is
+        plane_sum : Integer;
+    begin
+        if y1 > y2 then
+            return 0;
+        end if;
+        
+        if z1 > z2 then
+            return Sum_Plane(arr, x, y1 + 1, 1, y2, z2);
+        end if;
+        
+        plane_sum := arr(x, y1, z1);
+        plane_sum := plane_sum + Sum_Plane(arr, x, y1, z1 + 1, y2, z2);
+        return plane_sum;
+    end Sum_Plane;
+    
     -- Rekurzivní funkce pro výpočet sumy v daném rozsahu
     function Sum_Range_Recursive(arr : Cube_Array; 
-                                  x1, y1, z1 : Integer;
-                                  x2, y2, z2 : Integer) return Integer is
+                                  x1 : Integer; 
+                                  y1 : Integer; 
+                                  z1 : Integer;
+                                  x2 : Integer; 
+                                  y2 : Integer; 
+                                  z2 : Integer) return Integer is
         sum : Integer;
-        
-        -- Vnořená rekurzivní funkce pro sčítání v jedné rovině
-        function Sum_Plane(arr : Cube_Array; x, y1, z1, y2, z2 : Integer) return Integer is
-            plane_sum : Integer;
-        begin
-            if y1 > y2 then
-                return 0;
-            end if;
-            
-            if z1 > z2 then
-                return Sum_Plane(arr, x, y1 + 1, 1, y2, z2);
-            end if;
-            
-            plane_sum := arr(x, y1, z1);
-            plane_sum := plane_sum + Sum_Plane(arr, x, y1, z1 + 1, y2, z2);
-            return plane_sum;
-        end Sum_Plane;
-        
     begin
         if x1 > x2 then
             return 0;
@@ -120,29 +145,29 @@ procedure Recursive_Array_Operations is
         return sum;
     end Sum_Range_Recursive;
     
+    -- Funkce pro výpočet faktoru transformace
+    function Calculate_Factor(a : Integer; b : Integer; c : Integer) return Real is
+        sum : Integer;
+        result : Real;
+    begin
+        sum := a + b + c;
+        result := Integer_To_Real(sum) / 10.0;
+        return result;
+    end Calculate_Factor;
+    
+    -- Funkce pro transformaci hodnoty
+    function Transform_Value(val : Real; x_pos : Integer; y_pos : Integer; z_pos : Integer) return Real is
+        factor : Real;
+        result : Real;
+    begin
+        factor := Calculate_Factor(x_pos, y_pos, z_pos);
+        result := val * factor;
+        return result;
+    end Transform_Value;
+    
     -- Procedura pro aplikaci funkce na každý prvek krychle
     procedure Transform_Cube(arr : in out Real_Cube) is
         x, y, z : Integer;
-        
-        -- Vnořená funkce pro transformaci hodnoty
-        function Transform_Value(val : Real; x_pos, y_pos, z_pos : Integer) return Real is
-            factor : Real;
-            result : Real;
-            
-            -- Další úroveň vnořené funkce
-            function Calculate_Factor(a, b, c : Integer) return Real is
-                sum : Integer;
-            begin
-                sum := a + b + c;
-                return Integer_To_Real(sum) / 10.0;
-            end Calculate_Factor;
-            
-        begin
-            factor := Calculate_Factor(x_pos, y_pos, z_pos);
-            result := val * factor;
-            return result;
-        end Transform_Value;
-        
     begin
         x := 1;
         loop
@@ -194,7 +219,6 @@ procedure Recursive_Array_Operations is
     -- Hlavní tělo programu
     i : Integer;
     total_sum : Integer;
-    sum_str : String;
     fact_5 : Integer;
     layer_num : Integer;
     

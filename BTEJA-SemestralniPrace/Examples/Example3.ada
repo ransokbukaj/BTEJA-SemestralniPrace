@@ -14,30 +14,28 @@ procedure Statistical_Analysis is
     row_stats : Statistics_Array;
     labels : String_Array;
     
+    -- Funkce pro výpočet modifikátoru
+    function Calculate_Modifier(r : Integer; c : Integer) return Integer is
+        mod_val : Integer;
+    begin
+        mod_val := (r * c) mod 10;
+        return mod_val;
+    end Calculate_Modifier;
+    
+    -- Funkce pro generování testovacích dat
+    function Generate_Test_Value(row : Integer; col : Integer) return Integer is
+        base : Integer;
+        modifier : Integer;
+    begin
+        base := row * 10 + col;
+        modifier := Calculate_Modifier(row, col);
+        return base + modifier;
+    end Generate_Test_Value;
+    
     -- Vnořená procedura pro inicializaci dat
     procedure Initialize_Data is
         i, j : Integer;
         value : Integer;
-        
-        -- Hluboce vnořená funkce pro generování testovacích dat
-        function Generate_Test_Value(row, col : Integer) return Integer is
-            base : Integer;
-            modifier : Integer;
-            
-            -- Další úroveň vnoření - funkce pro výpočet modifikátoru
-            function Calculate_Modifier(r, c : Integer) return Integer is
-                mod_val : Integer;
-            begin
-                mod_val := (r * c) mod 10;
-                return mod_val;
-            end Calculate_Modifier;
-            
-        begin
-            base := row * 10 + col;
-            modifier := Calculate_Modifier(row, col);
-            return base + modifier;
-        end Generate_Test_Value;
-        
     begin
         Put_Line("Inicializace dat...");
         
@@ -57,34 +55,32 @@ procedure Statistical_Analysis is
         labels(5) := "Dataset_E";
     end Initialize_Data;
     
-    -- Funkce pro výpočet průměru řádku s vnořenými operacemi
+    -- Funkce pro filtrování extrémních hodnot
+    function Filter_Value(val : Real) return Real is
+        max_allowed : Real;
+    begin
+        max_allowed := 200.0;
+        if val > max_allowed then
+            return max_allowed;
+        else
+            return val;
+        end if;
+    end Filter_Value;
+    
+    -- Procedura pro akumulaci hodnot
+    procedure Accumulate(total : in out Real; value : Real) is
+        temp : Real;
+    begin
+        temp := Filter_Value(value);
+        total := total + temp;
+    end Accumulate;
+    
+    -- Funkce pro výpočet průměru řádku
     function Calculate_Row_Average(arr : Data_Array_2D; row : Integer) return Real is
         sum : Real;
         count : Integer;
         j : Integer;
         avg : Real;
-        
-        -- Vnořená procedura pro akumulaci hodnot
-        procedure Accumulate(in_out total : Real; value : Real) is
-            temp : Real;
-            
-            -- Vnořená funkce pro filtrování extrémních hodnot
-            function Filter_Value(val : Real) return Real is
-                max_allowed : Real;
-            begin
-                max_allowed := 200.0;
-                if val > max_allowed then
-                    return max_allowed;
-                else
-                    return val;
-                end if;
-            end Filter_Value;
-            
-        begin
-            temp := Filter_Value(value);
-            total := total + temp;
-        end Accumulate;
-        
     begin
         sum := 0.0;
         count := 0;
@@ -104,36 +100,34 @@ procedure Statistical_Analysis is
         return avg;
     end Calculate_Row_Average;
     
-    -- Procedura pro normalizaci dat s vnořenými funkcemi
-    procedure Normalize_Data(in_out arr : Data_Array_2D; averages : Statistics_Array) is
+    -- Funkce pro výpočet faktoru normalizace
+    function Compute_Factor(average : Real; position : Integer) return Real is
+        base_factor : Real;
+        pos_real : Real;
+    begin
+        if average > 0.0 then
+            base_factor := 100.0 / average;
+        else
+            base_factor := 1.0;
+        end if;
+        
+        pos_real := Integer_To_Real(position);
+        return base_factor * (pos_real / 5.0);
+    end Compute_Factor;
+    
+    -- Funkce pro normalizaci jedné hodnoty
+    function Normalize_Value(val : Real; avg : Real; row_idx : Integer) return Real is
+        normalized : Real;
+        factor : Real;
+    begin
+        factor := Compute_Factor(avg, row_idx);
+        normalized := val / factor;
+        return normalized;
+    end Normalize_Value;
+    
+    -- Procedura pro normalizaci dat
+    procedure Normalize_Data(arr : in out Data_Array_2D; averages : Statistics_Array) is
         i, j : Integer;
-        
-        -- Vnořená funkce pro normalizaci jedné hodnoty
-        function Normalize_Value(val : Real; avg : Real; row_idx : Integer) return Real is
-            normalized : Real;
-            factor : Real;
-            
-            -- Vnořená funkce pro výpočet faktoru
-            function Compute_Factor(average : Real; position : Integer) return Real is
-                base_factor : Real;
-                pos_real : Real;
-            begin
-                if average > 0.0 then
-                    base_factor := 100.0 / average;
-                else
-                    base_factor := 1.0;
-                end if;
-                
-                pos_real := Integer_To_Real(position);
-                return base_factor * (pos_real / 5.0);
-            end Compute_Factor;
-            
-        begin
-            factor := Compute_Factor(avg, row_idx);
-            normalized := val / factor;
-            return normalized;
-        end Normalize_Value;
-        
     begin
         for i in 1..5 loop
             for j in 1..10 loop
@@ -142,21 +136,20 @@ procedure Statistical_Analysis is
         end loop;
     end Normalize_Data;
     
-    -- Funkce pro nalezení maxima v řádku s rekurzivním přístupem
-    function Find_Max_In_Row(arr : Data_Array_2D; row, start_col, end_col : Integer) return Real is
+    -- Funkce pro porovnání dvou hodnot
+    function Max_Of_Two(a : Real; b : Real) return Real is
+    begin
+        if a > b then
+            return a;
+        else
+            return b;
+        end if;
+    end Max_Of_Two;
+    
+    -- Rekurzivní funkce pro nalezení maxima v řádku
+    function Find_Max_In_Row(arr : Data_Array_2D; row : Integer; start_col : Integer; end_col : Integer) return Real is
         mid : Integer;
         left_max, right_max : Real;
-        
-        -- Vnořená funkce pro porovnání dvou hodnot
-        function Max_Of_Two(a, b : Real) return Real is
-        begin
-            if a > b then
-                return a;
-            else
-                return b;
-            end if;
-        end Max_Of_Two;
-        
     begin
         if start_col = end_col then
             return arr(row, start_col);
@@ -170,50 +163,80 @@ procedure Statistical_Analysis is
         end if;
     end Find_Max_In_Row;
     
+    -- Funkce pro zaokrouhlení
+    function Round_Value(val : Real) return Integer is
+        rounded : Integer;
+    begin
+        rounded := Real_To_Integer(val + 0.5);
+        return rounded;
+    end Round_Value;
+    
+    -- Procedura pro formátovaný výpis řádku
+    procedure Print_Formatted_Line(label : String; value : Real; index : Integer) is
+        value_str : String;
+        rounded : Integer;
+    begin
+        Put("[");
+        Put_Integer(index);
+        Put("] ");
+        Put(label);
+        Put(": ");
+        
+        rounded := Round_Value(value);
+        Put_Integer(rounded);
+        Put(" (exact: ");
+        value_str := Real_To_String(value);
+        Put(value_str);
+        Put_Line(")");
+    end Print_Formatted_Line;
+    
     -- Procedura pro výpis statistik s konverzemi
-    procedure Print_Statistics(averages : Statistics_Array; labels : String_Array) is
+    procedure Print_Statistics(averages : Statistics_Array; labels_arr : String_Array) is
         i : Integer;
-        avg_str : String;
-        
-        -- Vnořená procedura pro formátovaný výpis
-        procedure Print_Formatted_Line(label : String; value : Real; index : Integer) is
-            value_str : String;
-            index_str : String;
-            
-            -- Vnořená funkce pro zaokrouhlení
-            function Round_Value(val : Real) return Integer is
-                rounded : Integer;
-            begin
-                rounded := Real_To_Integer(val + 0.5);
-                return rounded;
-            end Round_Value;
-            
-            rounded : Integer;
-            
-        begin
-            Put("[");
-            Put_Integer(index);
-            Put("] ");
-            Put(label);
-            Put(": ");
-            
-            rounded := Round_Value(value);
-            Put_Integer(rounded);
-            Put(" (exact: ");
-            value_str := Real_To_String(value);
-            Put(value_str);
-            Put_Line(")");
-        end Print_Formatted_Line;
-        
     begin
         Put_Line("===== STATISTIKY =====");
         
         for i in 1..5 loop
-            Print_Formatted_Line(labels(i), averages(i), i);
+            Print_Formatted_Line(labels_arr(i), averages(i), i);
         end loop;
         
         New_Line;
     end Print_Statistics;
+    
+    -- Funkce pro kontrolu validity řádku
+    function Is_Valid_Row(row : Integer) return Integer is
+    begin
+        if row >= 1 then
+            if row <= 5 then
+                return 1;
+            else
+                return 0;
+            end if;
+        else
+            return 0;
+        end if;
+    end Is_Valid_Row;
+    
+    -- Procedura pro zpracování jednoho řádku
+    procedure Process_Row(row_num : Integer) is
+        avg : Real;
+        valid : Integer;
+    begin
+        valid := Is_Valid_Row(row_num);
+        
+        if valid = 1 then
+            avg := Calculate_Row_Average(data, row_num);
+            row_stats(row_num) := avg;
+            
+            Put("Radek ");
+            Put_Integer(row_num);
+            Put(": prumer = ");
+            Put(Real_To_String(avg));
+            New_Line;
+        else
+            Put_Line("Neplatny radek!");
+        end if;
+    end Process_Row;
     
     -- Procedura pro zpracování celého datasetu
     procedure Process_Dataset is
@@ -222,40 +245,6 @@ procedure Statistical_Analysis is
         max_str : String;
         total_avg : Real;
         sum_of_avgs : Real;
-        
-        -- Vnořená procedura pro zpracování jednoho řádku
-        procedure Process_Row(row_num : Integer) is
-            avg : Real;
-            
-            -- Vnořená funkce pro kontrolu validity
-            function Is_Valid_Row(row : Integer) return Integer is
-            begin
-                if row >= 1 and row <= 5 then
-                    return 1;
-                else
-                    return 0;
-                end if;
-            end Is_Valid_Row;
-            
-            valid : Integer;
-            
-        begin
-            valid := Is_Valid_Row(row_num);
-            
-            if valid = 1 then
-                avg := Calculate_Row_Average(data, row_num);
-                row_stats(row_num) := avg;
-                
-                Put("Radek ");
-                Put_Integer(row_num);
-                Put(": prumer = ");
-                Put(Real_To_String(avg));
-                New_Line;
-            else
-                Put_Line("Neplatny radek!");
-            end if;
-        end Process_Row;
-        
     begin
         Put_Line("Zpracovani datasetu:");
         
@@ -296,47 +285,45 @@ procedure Statistical_Analysis is
         New_Line;
     end Process_Dataset;
     
+    -- Procedura pro test konverzního řetězce
+    procedure Test_Conversion_Chain is
+        i1, i2 : Integer;
+        r1 : Real;
+        s1 : String;
+    begin
+        Put_Line("Test konverzniho retezce:");
+        
+        i1 := 42;
+        Put("Integer: ");
+        Put_Integer(i1);
+        New_Line;
+        
+        s1 := Integer_To_String(i1);
+        Put("-> String: ");
+        Put_Line(s1);
+        
+        i2 := String_To_Integer(s1);
+        Put("-> Integer: ");
+        Put_Integer(i2);
+        New_Line;
+        
+        r1 := Integer_To_Real(i2);
+        Put("-> Real: ");
+        Put_Line(Real_To_String(r1));
+        
+        i1 := Real_To_Integer(r1);
+        Put("-> Integer: ");
+        Put_Integer(i1);
+        New_Line;
+        
+        New_Line;
+    end Test_Conversion_Chain;
+    
     -- Test všech typů konverzí
     procedure Test_All_Conversions is
         int_val : Integer;
         real_val : Real;
         str_val : String;
-        
-        -- Vnořená procedura pro test konverzního řetězce
-        procedure Test_Conversion_Chain is
-            i1, i2 : Integer;
-            r1, r2 : Real;
-            s1 : String;
-            
-        begin
-            Put_Line("Test konverzniho retezce:");
-            
-            i1 := 42;
-            Put("Integer: ");
-            Put_Integer(i1);
-            New_Line;
-            
-            s1 := Integer_To_String(i1);
-            Put("-> String: ");
-            Put_Line(s1);
-            
-            i2 := String_To_Integer(s1);
-            Put("-> Integer: ");
-            Put_Integer(i2);
-            New_Line;
-            
-            r1 := Integer_To_Real(i2);
-            Put("-> Real: ");
-            Put_Line(Real_To_String(r1));
-            
-            i1 := Real_To_Integer(r1);
-            Put("-> Integer: ");
-            Put_Integer(i1);
-            New_Line;
-            
-            New_Line;
-        end Test_Conversion_Chain;
-        
     begin
         Put_Line("===== TEST KONVERZI =====");
         

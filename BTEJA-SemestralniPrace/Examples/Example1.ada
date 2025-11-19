@@ -65,25 +65,26 @@ procedure Matrix_Operations is
         end loop;
     end Multiply_By_Scalar;
     
-    -- Funkce pro sčítání dvou matic s vnořenou procedurou pro validaci
-    function Add_Matrices(mat1, mat2 : Real_Matrix) return Real_Matrix is
+    -- Procedura pro sčítání prvku s validací (pomocná pro Add_Matrices)
+    procedure Add_Element_Values(a : Real; b : Real; sum : out Real) is
+    begin
+        sum := a + b;
+        -- Kontrola přetečení (simulace)
+        if sum > 1000.0 then
+            Put_Line("Warning: Large value detected");
+        end if;
+    end Add_Element_Values;
+    
+    -- Funkce pro sčítání dvou matic
+    function Add_Matrices(mat1 : Real_Matrix; mat2 : Real_Matrix) return Real_Matrix is
         result : Real_Matrix;
         i, j : Integer;
-        
-        -- Vnořená procedura pro kontrolu a sčítání prvku
-        procedure Add_And_Validate(a, b : Real; out sum : Real) is
-        begin
-            sum := a + b;
-            -- Kontrola přetečení (simulace)
-            if sum > 1000.0 then
-                Put_Line("Warning: Large value detected");
-            end if;
-        end Add_And_Validate;
-        
+        temp_sum : Real;
     begin
         for i in 1..3 loop
             for j in 1..3 loop
-                Add_And_Validate(mat1(i, j), mat2(i, j), result(i, j));
+                Add_Element_Values(mat1(i, j), mat2(i, j), temp_sum);
+                result(i, j) := temp_sum;
             end loop;
         end loop;
         return result;
