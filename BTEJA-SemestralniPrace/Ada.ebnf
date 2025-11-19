@@ -1,0 +1,156 @@
+(*
+  Gramatika podmnožiny jazyka ADA pro kompilátor
+  Formát: Tatsu EBNF
+*)
+
+(* Hlavní program *)
+program = procedure_declaration $ ;
+
+(* Deklarace procedury/funkce *)
+procedure_declaration = 
+    "procedure" identifier [ formal_parameters ] "is"
+        declarations
+    "begin"
+        statements
+    "end" identifier ";"
+    |
+    "function" identifier [ formal_parameters ] "return" type_name "is"
+        declarations
+    "begin"
+        statements
+    "end" identifier ";"
+;
+
+(* Formální parametry *)
+formal_parameters = "(" parameter_list ")" ;
+
+parameter_list = parameter { ";" parameter } ;
+
+parameter = identifier_list ":" [ "in" | "out" | "in" "out" ] type_name ;
+
+identifier_list = identifier { "," identifier } ;
+
+(* Deklarace *)
+declarations = { declaration } ;
+
+declaration = 
+    variable_declaration
+    | type_declaration
+    | procedure_declaration
+;
+
+(* Deklarace proměnných *)
+variable_declaration = identifier_list ":" type_name [ ":=" expression ] ";" ;
+
+(* Deklarace typů (pro pole) *)
+type_declaration = "type" identifier "is" type_definition ";" ;
+
+type_definition = 
+    "array" "(" index_range { "," index_range } ")" "of" type_name
+;
+
+index_range = expression ".." expression ;
+
+(* Typy *)
+type_name = 
+    "Integer"
+    | "Real" 
+    | "String"
+    | identifier  (* pro uživatelsky definované typy *)
+;
+
+(* Příkazy *)
+statements = statement { statement } ;
+
+statement = 
+    assignment_statement
+    | if_statement
+    | loop_statement
+    | for_statement
+    | procedure_call
+    | return_statement
+;
+
+(* Přiřazení *)
+assignment_statement = variable ":=" expression ";" ;
+
+variable = 
+    identifier [ array_access ]
+;
+
+array_access = "(" expression { "," expression } ")" ;
+
+(* Podmínka *)
+if_statement = 
+    "if" expression "then"
+        statements
+    [ "elsif" expression "then"
+        statements ]
+    [ "else"
+        statements ]
+    "end" "if" ";"
+;
+
+(* Cyklus loop *)
+loop_statement = 
+    [ identifier ":" ] "loop"
+        statements
+    "end" "loop" [ identifier ] ";"
+;
+
+(* Cyklus for *)
+for_statement = 
+    "for" identifier "in" [ "reverse" ] expression ".." expression "loop"
+        statements
+    "end" "loop" ";"
+;
+
+(* Volání procedury/funkce *)
+procedure_call = identifier [ actual_parameters ] ";" ;
+
+actual_parameters = "(" expression_list ")" ;
+
+expression_list = expression { "," expression } ;
+
+(* Return příkaz *)
+return_statement = "return" [ expression ] ";" ;
+
+(* Výrazy *)
+expression = simple_expression [ relational_operator simple_expression ] ;
+
+relational_operator = "=" | "/=" | "<" | "<=" | ">" | ">=" ;
+
+simple_expression = [ sign ] term { adding_operator term } ;
+
+sign = "+" | "-" ;
+
+adding_operator = "+" | "-" | "or" ;
+
+term = factor { multiplying_operator factor } ;
+
+multiplying_operator = "*" | "/" | "mod" | "and" ;
+
+factor = 
+    primary [ "**" primary ]
+;
+
+primary = 
+    integer_literal
+    | real_literal
+    | string_literal
+    | function_call
+    | variable
+    | "(" expression ")"
+    | "not" primary
+;
+
+function_call = identifier actual_parameters ;
+
+(* Literály *)
+integer_literal = /[0-9]+/ ;
+
+real_literal = /[0-9]+\.[0-9]+([eE][+-]?[0-9]+)?/ ;
+
+string_literal = /"[^"]*"/ ;
+
+identifier = /[a-zA-Z][a-zA-Z0-9_]*/ ;
