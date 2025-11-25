@@ -348,6 +348,19 @@ namespace BTEJA_SemestralniPrace
                     {
                         AddError($"Nedefinovaná funkce '{funcCall.Name}'", funcCall.Line, funcCall.Column);
                     }
+                    else if (funcSymbol is VariableSymbol varSymForFunc)
+                    {
+                        // Může se jednat o přístup k poli, což se musí zpracovat jako Variable, ne FunctionCall
+                        var possibleArray = new Variable
+                        {
+                            Name = funcCall.Name,
+                            ArrayIndices = funcCall.Arguments,
+                            Line = funcCall.Line,
+                            Column = funcCall.Column
+                        };
+                        expr.ExpressionType = AnalyzeVariable(possibleArray);
+                        return expr.ExpressionType;
+                    }
                     else if (funcSymbol is SubprogramSymbol subSym && subSym.IsFunction)
                     {
                         CheckArguments(funcCall.Name, subSym.Parameters, funcCall.Arguments, funcCall.Line, funcCall.Column);
@@ -372,6 +385,26 @@ namespace BTEJA_SemestralniPrace
             {
                 AddError($"Nedefinovaná proměnná '{variable.Name}'", variable.Line, variable.Column);
                 return null;
+            }
+
+            // Kontrola, zda se jedná o funkci bez parametrů volanou bez závorek
+            if (symbol is SubprogramSymbol subSymFunc && subSymFunc.IsFunction)
+            {
+                if (variable.ArrayIndices != null && variable.ArrayIndices.Count > 0)
+                {
+                    AddError($"'{variable.Name}' je funkce, ne pole", variable.Line, variable.Column);
+                    return null;
+                }
+
+                if (subSymFunc.Parameters.Count == 0)
+                {
+                    return subSymFunc.ReturnType;
+                }
+                else
+                {
+                    AddError($"Funkce '{variable.Name}' vyžaduje parametry", variable.Line, variable.Column);
+                    return null;
+                }
             }
 
             if (symbol is VariableSymbol varSym)
