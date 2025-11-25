@@ -137,6 +137,11 @@ namespace BTEJA_SemestralniPrace.AST
         public Expression Value { get; set; }
     }
 
+    public class ExitStatement : Statement
+    {
+        public string Label { get; set; }
+    }
+
     // Výrazy
     public abstract class Expression : ASTNode
     {

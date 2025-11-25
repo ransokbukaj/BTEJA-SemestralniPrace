@@ -58,6 +58,7 @@ statement:
     | forStatement
     | procedureCall
     | returnStatement
+    | exitStatement
 ;
 
 // Přiřazení
@@ -97,6 +98,9 @@ expressionList: expression (',' expression)*;
 
 // Return příkaz
 returnStatement: 'return' expression? ';';
+
+// Exit příkaz
+exitStatement: 'exit' identifier? ';';
 
 // Výrazy
 expression: simpleExpression (relationalOperator simpleExpression)?;

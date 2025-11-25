@@ -69,6 +69,7 @@ statement =
     | for_statement
     | procedure_call
     | return_statement
+    | exit_statement
 ;
 
 (* Přiřazení *)
@@ -114,6 +115,9 @@ expression_list = expression { "," expression } ;
 
 (* Return příkaz *)
 return_statement = "return" [ expression ] ";" ;
+
+(* Exit příkaz *)
+exit_statement = "exit" [ expression ] ";" ;
 
 (* Výrazy *)
 expression = simple_expression [ relational_operator simple_expression ] ;

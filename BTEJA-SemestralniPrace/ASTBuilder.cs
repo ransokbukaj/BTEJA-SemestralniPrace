@@ -7,7 +7,7 @@ using Antlr4.Runtime.Misc;
 using BTEJA_SemestralniPrace.AST;
 
 namespace BTEJA_SemestralniPrace
-{    
+{
     public class ASTBuilder : AdaBaseVisitor<object>
     {
         public override object VisitProgram([NotNull] AdaParser.ProgramContext context)
@@ -213,6 +213,8 @@ namespace BTEJA_SemestralniPrace
                 return Visit(context.forStatement());
             if (context.procedureCall() != null)
                 return Visit(context.procedureCall());
+            if (context.exitStatement() != null)
+                return Visit(context.exitStatement());
             return Visit(context.returnStatement());
         }
 
@@ -333,6 +335,22 @@ namespace BTEJA_SemestralniPrace
             }
 
             return ret;
+        }
+
+        public override object VisitExitStatement([NotNull] AdaParser.ExitStatementContext context)
+        {
+            var exit = new ExitStatement
+            {
+                Line = context.Start.Line,
+                Column = context.Start.Column
+            };
+
+            if (context.identifier() != null)
+            {
+                exit.Label = context.identifier().GetText();
+            }
+
+            return exit;
         }
 
         public override object VisitExpression([NotNull] AdaParser.ExpressionContext context)

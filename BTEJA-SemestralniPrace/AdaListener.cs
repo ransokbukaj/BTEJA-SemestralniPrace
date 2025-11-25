@@ -291,6 +291,16 @@ public interface IAdaListener : IParseTreeListener {
 	/// <param name="context">The parse tree.</param>
 	void ExitReturnStatement([NotNull] AdaParser.ReturnStatementContext context);
 	/// <summary>
+	/// Enter a parse tree produced by <see cref="AdaParser.exitStatement"/>.
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	void EnterExitStatement([NotNull] AdaParser.ExitStatementContext context);
+	/// <summary>
+	/// Exit a parse tree produced by <see cref="AdaParser.exitStatement"/>.
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	void ExitExitStatement([NotNull] AdaParser.ExitStatementContext context);
+	/// <summary>
 	/// Enter a parse tree produced by <see cref="AdaParser.expression"/>.
 	/// </summary>
 	/// <param name="context">The parse tree.</param>

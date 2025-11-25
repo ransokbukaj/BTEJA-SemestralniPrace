@@ -188,6 +188,12 @@ public interface IAdaVisitor<Result> : IParseTreeVisitor<Result> {
 	/// <return>The visitor result.</return>
 	Result VisitReturnStatement([NotNull] AdaParser.ReturnStatementContext context);
 	/// <summary>
+	/// Visit a parse tree produced by <see cref="AdaParser.exitStatement"/>.
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	/// <return>The visitor result.</return>
+	Result VisitExitStatement([NotNull] AdaParser.ExitStatementContext context);
+	/// <summary>
 	/// Visit a parse tree produced by <see cref="AdaParser.expression"/>.
 	/// </summary>
 	/// <param name="context">The parse tree.</param>

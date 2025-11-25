@@ -348,6 +348,18 @@ public partial class AdaBaseListener : IAdaListener {
 	/// <param name="context">The parse tree.</param>
 	public virtual void ExitReturnStatement([NotNull] AdaParser.ReturnStatementContext context) { }
 	/// <summary>
+	/// Enter a parse tree produced by <see cref="AdaParser.exitStatement"/>.
+	/// <para>The default implementation does nothing.</para>
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	public virtual void EnterExitStatement([NotNull] AdaParser.ExitStatementContext context) { }
+	/// <summary>
+	/// Exit a parse tree produced by <see cref="AdaParser.exitStatement"/>.
+	/// <para>The default implementation does nothing.</para>
+	/// </summary>
+	/// <param name="context">The parse tree.</param>
+	public virtual void ExitExitStatement([NotNull] AdaParser.ExitStatementContext context) { }
+	/// <summary>
 	/// Enter a parse tree produced by <see cref="AdaParser.expression"/>.
 	/// <para>The default implementation does nothing.</para>
 	/// </summary>
