@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.IO;
 using Antlr4.Runtime;
 
 namespace BTEJA_SemestralniPrace
@@ -33,7 +34,8 @@ namespace BTEJA_SemestralniPrace
             }
 
             string sourceCode = File.ReadAllText(filePath);
-            var errors = AnalyzeSource(sourceCode);
+            string outputFile = Path.GetFileNameWithoutExtension(filePath);
+            var errors = AnalyzeSource(sourceCode, outputFile);
 
             if (errors.Count == 0)
             {
@@ -95,11 +97,12 @@ namespace BTEJA_SemestralniPrace
             {
                 string filePath = exampleFiles[i];
                 string fileName = Path.GetFileName(filePath);
+                string outputFile = Path.GetFileNameWithoutExtension(filePath);
 
                 Console.WriteLine($"[{i + 1}/{totalTests}] {fileName}");
 
                 string sourceCode = File.ReadAllText(filePath);
-                var errors = AnalyzeSource(sourceCode);
+                var errors = AnalyzeSource(sourceCode, outputFile);
 
                 if (errors.Count == 0)
                 {
@@ -154,18 +157,20 @@ namespace BTEJA_SemestralniPrace
             }
         }
 
-        static List<string> AnalyzeSource(string sourceCode)
+        static List<string> AnalyzeSource(string sourceCode, string outputFile = null)
         {
             var errors = new List<string>();
 
             try
             {
                 // 1. Lexikální analýza
+                Console.WriteLine("Fáze 1: Lexikální analýza");
                 var inputStream = new AntlrInputStream(sourceCode);
                 var lexer = new AdaLexer(inputStream);
                 var tokenStream = new CommonTokenStream(lexer);
 
                 // 2. Syntaktická analýza
+                Console.WriteLine("Fáze 2: Syntaktická analýza");
                 var parser = new AdaParser(tokenStream);
 
                 // Error listener
@@ -182,16 +187,34 @@ namespace BTEJA_SemestralniPrace
                 }
 
                 // 3. Vytvoření AST
+                Console.WriteLine("Fáze 3: Vytváření AST");
                 var astBuilder = new ASTBuilder();
-                var program = (BTEJA_SemestralniPrace.AST.Program)astBuilder.VisitProgram(parseTree);
+                var program = (AST.Program)astBuilder.VisitProgram(parseTree);
 
                 // 4. Sémantická analýza
+                Console.WriteLine("Fáze 4: Sémantická analýza");
                 var semanticAnalyzer = new SemanticAnalyzer();
                 semanticAnalyzer.Analyze(program);
 
                 if (semanticAnalyzer.Errors.Count > 0)
                 {
                     errors.AddRange(semanticAnalyzer.Errors);
+                    return errors;
+                }
+
+                // 5. Generování LLVM IR
+                if (outputFile != null)
+                {
+                    Console.WriteLine("Fáze 5: Generování LLVM IR");
+                    var codeGenerator = new LLVMCodeGenerator("AdaModule");
+                    codeGenerator.Generate(program);
+
+                    // Uložit LLVM IR
+                    codeGenerator.WriteToFile(outputFile + ".ll");
+                    codeGenerator.WriteBitcodeToFile(outputFile + ".bc");
+
+                    Console.WriteLine($"LLVM IR uloženo do: {outputFile}.ll");
+                    Console.WriteLine($"LLVM Bitcode uloženo do: {outputFile}.bc");
                 }
             }
             catch (Exception ex)
