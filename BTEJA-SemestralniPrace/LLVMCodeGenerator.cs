@@ -152,7 +152,7 @@ namespace BTEJA_SemestralniPrace
 
             // Funkce pro vstup
             DeclareGetLineFunction();
-            DeclareGetIntegerFunction();
+            DeclareGetFunction();
             DeclareGetRealFunction();
 
             // Konverzní funkce
@@ -170,20 +170,63 @@ namespace BTEJA_SemestralniPrace
             DeclareSimpleMathFunction("tan");
             DeclareSimpleMathFunction("exp");
             DeclareSimpleMathFunction("log");
+            DeclareSimpleMathFunction("fabs");
 
-            // pow má dva parametry
+            // Aliasy s velkým písmenem pro konzistenci s NativeFunctionManager
+            declaredFunctions["Sqrt"] = declaredFunctions["sqrt"];
+            declaredFunctions["Sin"] = declaredFunctions["sin"];
+            declaredFunctions["Cos"] = declaredFunctions["cos"];
+            declaredFunctions["Tan"] = declaredFunctions["tan"];
+            declaredFunctions["Exp"] = declaredFunctions["exp"];
+            declaredFunctions["Log"] = declaredFunctions["log"];
+
+            // Abs_Integer
+            var absIntType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.Int32,
+                new[] { LLVMTypeRef.Int32 }
+            );
+            var absIntFunc = module.AddFunction("abs", absIntType);
+            declaredFunctions["Abs_Integer"] = new FunctionInfo
+            {
+                Function = absIntFunc,
+                Type = absIntType,
+                Name = "abs",
+                IsBuiltin = true
+            };
+
+            // Abs_Real (použijeme fabs)
+            declaredFunctions["Abs_Real"] = new FunctionInfo
+            {
+                Function = declaredFunctions["fabs"].Function,
+                Type = declaredFunctions["fabs"].Type,
+                Name = "fabs",
+                IsBuiltin = true
+            };
+
+            // Power (pow má dva parametry)
             var powType = LLVMTypeRef.CreateFunction(
                 LLVMTypeRef.Double,
                 new[] { LLVMTypeRef.Double, LLVMTypeRef.Double }
             );
             var powFunc = module.AddFunction("pow", powType);
-            declaredFunctions["pow"] = new FunctionInfo
+            declaredFunctions["Power"] = new FunctionInfo
             {
                 Function = powFunc,
                 Type = powType,
                 Name = "pow",
                 IsBuiltin = true
             };
+
+            // Řetězcové funkce
+            DeclareStringLengthFunction();
+            DeclareSubstringFunction();
+            DeclareConcatFunction();
+            DeclareToUpperFunction();
+            DeclareToLowerFunction();
+
+            // Funkce pro náhodná čísla
+            DeclareRandomIntegerFunction();
+            DeclareRandomRealFunction();
         }
 
         private void DeclarePutFunction(string name, bool newline)
@@ -265,7 +308,7 @@ namespace BTEJA_SemestralniPrace
             };
         }
 
-        private void DeclareGetIntegerFunction()
+        private void DeclareGetFunction()
         {
             // Get(value: out Integer)
             var funcType = LLVMTypeRef.CreateFunction(
@@ -321,6 +364,143 @@ namespace BTEJA_SemestralniPrace
                 Function = func,
                 Type = funcType,
                 Name = name,
+                IsBuiltin = true
+            };
+        }
+
+        private void DeclareStringLengthFunction()
+        {
+            // size_t strlen(const char *str)
+            var funcType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.Int32,
+                new[] { LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0) }
+            );
+            var func = module.AddFunction("strlen", funcType);
+            declaredFunctions["Length"] = new FunctionInfo
+            {
+                Function = func,
+                Type = funcType,
+                Name = "strlen",
+                IsBuiltin = true
+            };
+        }
+
+        private void DeclareSubstringFunction()
+        {
+            // char* substring(const char *str, int start, int length)
+            var funcType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0),
+                new[] {
+                    LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0),
+                    LLVMTypeRef.Int32,
+                    LLVMTypeRef.Int32
+                }
+            );
+            var func = module.AddFunction("substring", funcType);
+            declaredFunctions["Substring"] = new FunctionInfo
+            {
+                Function = func,
+                Type = funcType,
+                Name = "substring",
+                IsBuiltin = true
+            };
+        }
+
+        private void DeclareConcatFunction()
+        {
+            // char* strcat(char *dest, const char *src)
+            var funcType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0),
+                new[] {
+                    LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0),
+                    LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0)
+                }
+            );
+            var func = module.AddFunction("strcat", funcType);
+            declaredFunctions["Concat"] = new FunctionInfo
+            {
+                Function = func,
+                Type = funcType,
+                Name = "strcat",
+                IsBuiltin = true
+            };
+        }
+
+        private void DeclareToUpperFunction()
+        {
+            // char* to_upper(const char *str)
+            var funcType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0),
+                new[] { LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0) }
+            );
+            var func = module.AddFunction("to_upper", funcType);
+            declaredFunctions["To_Upper"] = new FunctionInfo
+            {
+                Function = func,
+                Type = funcType,
+                Name = "to_upper",
+                IsBuiltin = true
+            };
+        }
+
+        private void DeclareToLowerFunction()
+        {
+            // char* to_lower(const char *str)
+            var funcType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0),
+                new[] { LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0) }
+            );
+            var func = module.AddFunction("to_lower", funcType);
+            declaredFunctions["To_Lower"] = new FunctionInfo
+            {
+                Function = func,
+                Type = funcType,
+                Name = "to_lower",
+                IsBuiltin = true
+            };
+        }
+
+        private void DeclareRandomIntegerFunction()
+        {
+            // int rand() - základní C funkce
+            var randType = LLVMTypeRef.CreateFunction(LLVMTypeRef.Int32, Array.Empty<LLVMTypeRef>());
+            var randFunc = module.AddFunction("rand", randType);
+            declaredFunctions["rand"] = new FunctionInfo
+            {
+                Function = randFunc,
+                Type = randType,
+                Name = "rand",
+                IsBuiltin = true
+            };
+
+            // int random_integer(int min, int max)
+            var funcType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.Int32,
+                new[] { LLVMTypeRef.Int32, LLVMTypeRef.Int32 }
+            );
+            var func = module.AddFunction("random_integer", funcType);
+            declaredFunctions["Random_Integer"] = new FunctionInfo
+            {
+                Function = func,
+                Type = funcType,
+                Name = "random_integer",
+                IsBuiltin = true
+            };
+        }
+
+        private void DeclareRandomRealFunction()
+        {
+            // double random_real()
+            var funcType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.Double,
+                Array.Empty<LLVMTypeRef>()
+            );
+            var func = module.AddFunction("random_real", funcType);
+            declaredFunctions["Random_Real"] = new FunctionInfo
+            {
+                Function = func,
+                Type = funcType,
+                Name = "random_real",
                 IsBuiltin = true
             };
         }
@@ -1121,6 +1301,18 @@ namespace BTEJA_SemestralniPrace
                 return GenerateMathCall(funcCall);
             }
 
+            // Pak zkontrolovat řetězcové funkce
+            if (IsStringFunction(funcCall.Name))
+            {
+                return GenerateStringCall(funcCall);
+            }
+
+            // Pak zkontrolovat funkce pro náhodná čísla
+            if (IsRandomFunction(funcCall.Name))
+            {
+                return GenerateRandomCall(funcCall);
+            }
+
             // Běžné volání funkce
             if (!declaredFunctions.TryGetValue(funcCall.Name, out var funcInfo))
             {
@@ -1149,8 +1341,21 @@ namespace BTEJA_SemestralniPrace
 
         private bool IsMathFunction(string name)
         {
-            return name == "sqrt" || name == "sin" || name == "cos" ||
-                   name == "tan" || name == "exp" || name == "log" || name == "pow";
+            return name == "Sqrt" || name == "Sin" || name == "Cos" ||
+                   name == "Tan" || name == "Exp" || name == "Log" ||
+                   name == "Power" ||
+                   name == "Abs_Integer" || name == "Abs_Real";
+        }
+
+        private bool IsStringFunction(string name)
+        {
+            return name == "Length" || name == "Substring" ||
+                   name == "Concat" || name == "To_Upper" || name == "To_Lower";
+        }
+
+        private bool IsRandomFunction(string name)
+        {
+            return name == "Random_Integer" || name == "Random_Real";
         }
 
         private LLVMValueRef GenerateConversionCall(FunctionCall funcCall)
@@ -1227,7 +1432,13 @@ namespace BTEJA_SemestralniPrace
                 return LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
             }
 
-            // Konvertovat argumenty na double pokud jsou integer
+            // Speciální zpracování pro Abs_Integer (nemá konverzi)
+            if (funcCall.Name == "Abs_Integer")
+            {
+                return builder.BuildCall2(mathFunc.Type, mathFunc.Function, args, "abscall");
+            }
+
+            // Konvertovat argumenty na double pokud jsou integer (kromě Abs_Integer)
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i].TypeOf.Kind == LLVMTypeKind.LLVMIntegerTypeKind)
@@ -1237,6 +1448,44 @@ namespace BTEJA_SemestralniPrace
             }
 
             return builder.BuildCall2(mathFunc.Type, mathFunc.Function, args, "mathcall");
+        }
+
+        private LLVMValueRef GenerateStringCall(FunctionCall funcCall)
+        {
+            if (!declaredFunctions.TryGetValue(funcCall.Name, out var stringFunc))
+            {
+                AddError($"Řetězcová funkce '{funcCall.Name}' nebyla deklarována", funcCall);
+                return LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
+            }
+
+            var args = funcCall.Arguments.Select(GenerateExpression).ToArray();
+
+            if (args.Any(a => a.Handle == IntPtr.Zero))
+            {
+                AddError($"Neplatné argumenty pro řetězcovou funkci '{funcCall.Name}'", funcCall);
+                return LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
+            }
+
+            return builder.BuildCall2(stringFunc.Type, stringFunc.Function, args, "strcall");
+        }
+
+        private LLVMValueRef GenerateRandomCall(FunctionCall funcCall)
+        {
+            if (!declaredFunctions.TryGetValue(funcCall.Name, out var randomFunc))
+            {
+                AddError($"Funkce pro náhodná čísla '{funcCall.Name}' nebyla deklarována", funcCall);
+                return LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
+            }
+
+            var args = funcCall.Arguments.Select(GenerateExpression).ToArray();
+
+            if (args.Any(a => a.Handle == IntPtr.Zero))
+            {
+                AddError($"Neplatné argumenty pro funkci náhodných čísel '{funcCall.Name}'", funcCall);
+                return LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
+            }
+
+            return builder.BuildCall2(randomFunc.Type, randomFunc.Function, args, "randcall");
         }
 
         private LLVMValueRef GenerateBinaryExpression(BinaryExpression binary)
@@ -1282,8 +1531,8 @@ namespace BTEJA_SemestralniPrace
                     return builder.BuildSRem(left, right, "modtmp");
 
                 case BinaryOperator.Power:
-                    // Pro mocninu použijeme pow funkci
-                    var powFunc = declaredFunctions["pow"].Function;
+                    // Pro mocninu použijeme Power funkci
+                    var powFunc = declaredFunctions["Power"].Function;
 
                     if (!isFloat)
                     {
