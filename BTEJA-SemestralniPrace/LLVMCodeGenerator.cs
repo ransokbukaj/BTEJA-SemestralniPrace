@@ -23,10 +23,9 @@ namespace BTEJA_SemestralniPrace
         // Pro správu loop exit pointů
         private Stack<LLVMBasicBlockRef> loopExitBlocks;
 
-        // Reference na SemanticAnalyzer pro přístup k symbol table
-        private SymbolTable symbolTable;
-
-        public List<string> Errors { get; } = new List<string>();
+        // Error handling
+        public List<CompilerError> Errors { get; } = new List<CompilerError>();
+        public List<CompilerWarning> Warnings { get; } = new List<CompilerWarning>();
 
         public LLVMCodeGenerator(string moduleName)
         {
@@ -41,11 +40,6 @@ namespace BTEJA_SemestralniPrace
 
             InitializeBuiltinTypes();
             DeclareBuiltinFunctions();
-        }
-
-        public void SetSymbolTable(SymbolTable table)
-        {
-            symbolTable = table;
         }
 
         private void InitializeBuiltinTypes()
@@ -88,6 +82,42 @@ namespace BTEJA_SemestralniPrace
                 Name = "sprintf"
             };
 
+            // scanf pro vstup
+            var scanfType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.Int32,
+                new[] { LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0) },
+                true
+            );
+            var scanfFunc = module.AddFunction("scanf", scanfType);
+            declaredFunctions["scanf"] = new FunctionInfo
+            {
+                Function = scanfFunc,
+                Type = scanfType,
+                Name = "scanf"
+            };
+
+            // fgets pro čtení řádku
+            var fgetsType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0),
+                new[] {
+                    LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0),
+                    LLVMTypeRef.Int32,
+                    LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0)  // FILE*
+                }
+            );
+            var fgetsFunc = module.AddFunction("fgets", fgetsType);
+            declaredFunctions["fgets"] = new FunctionInfo
+            {
+                Function = fgetsFunc,
+                Type = fgetsType,
+                Name = "fgets"
+            };
+
+            // stdin globální proměnná
+            var stdinType = LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0);
+            var stdinVar = module.AddGlobal(stdinType, "stdin");
+            stdinVar.Linkage = LLVMLinkage.LLVMExternalLinkage;
+
             // atoi, atof pro konverze ze stringu
             var atoiType = LLVMTypeRef.CreateFunction(
                 LLVMTypeRef.Int32,
@@ -119,6 +149,11 @@ namespace BTEJA_SemestralniPrace
             DeclarePutIntegerFunction();
             DeclarePutRealFunction();
             DeclareNewLineFunction();
+
+            // Funkce pro vstup
+            DeclareGetLineFunction();
+            DeclareGetIntegerFunction();
+            DeclareGetRealFunction();
 
             // Konverzní funkce
             DeclareConversionFunction("Integer_To_String", new[] { LLVMTypeRef.Int32 }, LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0));
@@ -213,6 +248,57 @@ namespace BTEJA_SemestralniPrace
             };
         }
 
+        private void DeclareGetLineFunction()
+        {
+            // Get_Line(str: out String)
+            var funcType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.Void,
+                new[] { LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0) }
+            );
+            var func = module.AddFunction("Get_Line", funcType);
+            declaredFunctions["Get_Line"] = new FunctionInfo
+            {
+                Function = func,
+                Type = funcType,
+                Name = "Get_Line",
+                IsBuiltin = true
+            };
+        }
+
+        private void DeclareGetIntegerFunction()
+        {
+            // Get(value: out Integer)
+            var funcType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.Void,
+                new[] { LLVMTypeRef.CreatePointer(LLVMTypeRef.Int32, 0) }
+            );
+            var func = module.AddFunction("Get", funcType);
+            declaredFunctions["Get"] = new FunctionInfo
+            {
+                Function = func,
+                Type = funcType,
+                Name = "Get",
+                IsBuiltin = true
+            };
+        }
+
+        private void DeclareGetRealFunction()
+        {
+            // Get_Real(value: out Real)
+            var funcType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.Void,
+                new[] { LLVMTypeRef.CreatePointer(LLVMTypeRef.Double, 0) }
+            );
+            var func = module.AddFunction("Get_Real", funcType);
+            declaredFunctions["Get_Real"] = new FunctionInfo
+            {
+                Function = func,
+                Type = funcType,
+                Name = "Get_Real",
+                IsBuiltin = true
+            };
+        }
+
         private void DeclareConversionFunction(string name, LLVMTypeRef[] paramTypes, LLVMTypeRef returnType)
         {
             var funcType = LLVMTypeRef.CreateFunction(returnType, paramTypes);
@@ -239,6 +325,43 @@ namespace BTEJA_SemestralniPrace
             };
         }
 
+        // === Error Handling ===
+
+        private void AddError(string message, object context = null)
+        {
+            Errors.Add(new CompilerError
+            {
+                Message = message,
+                Context = context?.GetType().Name ?? "Unknown"
+            });
+        }
+
+        private void AddWarning(string message, object context = null)
+        {
+            Warnings.Add(new CompilerWarning
+            {
+                Message = message,
+                Context = context?.GetType().Name ?? "Unknown"
+            });
+        }
+
+        private bool HasErrors()
+        {
+            return Errors.Count > 0;
+        }
+
+        private bool Validate()
+        {
+            // Základní validace před generováním kódu
+            if (module.Handle == IntPtr.Zero)
+            {
+                AddError("LLVM modul není inicializován");
+                return false;
+            }
+
+            return !HasErrors();
+        }
+
         // === Správa scopů ===
 
         private void EnterScope()
@@ -254,27 +377,26 @@ namespace BTEJA_SemestralniPrace
             }
         }
 
-        private void AddVariable(string name, LLVMValueRef value)
+        private void AddVariable(string name, LLVMValueRef value, object context = null)
         {
             if (variableScopes.Count == 0)
             {
                 EnterScope();
             }
-            variableScopes.Peek()[name] = value;
-        }
 
-        private LLVMValueRef GetVariable(string name)
-        {
-            // Hledat od nejnovějšího scope k nejstaršímu
-            foreach (var scope in variableScopes)
+            // Kontrola kolize v aktuálním scope
+            if (variableScopes.Peek().ContainsKey(name))
             {
-                if (scope.TryGetValue(name, out var value))
-                {
-                    return value;
-                }
+                AddWarning($"Proměnná '{name}' již existuje v tomto scopu a bude přepsána", context);
             }
 
-            throw new Exception($"Proměnná '{name}' nebyla nalezena");
+            // Kontrola kolize s funkcemi
+            if (declaredFunctions.ContainsKey(name))
+            {
+                AddWarning($"Název '{name}' koliduje s existující funkcí", context);
+            }
+
+            variableScopes.Peek()[name] = value;
         }
 
         private bool TryGetVariable(string name, out LLVMValueRef value)
@@ -297,24 +419,53 @@ namespace BTEJA_SemestralniPrace
         {
             try
             {
+                if (!Validate())
+                {
+                    return;
+                }
+
                 GenerateSubprogram(program.MainProcedure);
+
+                // Závěrečná validace
+                if (HasErrors())
+                {
+                    return;
+                }
             }
             catch (Exception ex)
             {
-                Errors.Add($"Chyba při generování kódu: {ex.Message}");
-                throw;
+                AddError($"Neočekávaná chyba při generování kódu: {ex.Message}");
             }
         }
 
         private void GenerateSubprogram(SubprogramDeclaration subprogram)
         {
+            if (subprogram == null)
+            {
+                AddError("Subprogram je null");
+                return;
+            }
+
             EnterScope();
+
+            // Kontrola kolize názvu
+            if (declaredFunctions.ContainsKey(subprogram.Name) &&
+                !declaredFunctions[subprogram.Name].IsBuiltin)
+            {
+                AddError($"Funkce '{subprogram.Name}' je již deklarována", subprogram);
+                ExitScope();
+                return;
+            }
 
             // Určit návratový typ
             LLVMTypeRef returnType;
             if (subprogram is FunctionDeclaration func)
             {
-                returnType = GetLLVMType(func.ReturnType);
+                if (!TryGetLLVMType(func.ReturnType, out returnType, subprogram))
+                {
+                    ExitScope();
+                    return;
+                }
             }
             else
             {
@@ -322,12 +473,23 @@ namespace BTEJA_SemestralniPrace
             }
 
             // Vytvořit typy parametrů
-            var paramTypes = subprogram.Parameters
-                .SelectMany(p => p.Names.Select(n => GetLLVMType(p.Type)))
-                .ToArray();
+            var paramTypes = new List<LLVMTypeRef>();
+            foreach (var param in subprogram.Parameters)
+            {
+                if (!TryGetLLVMType(param.Type, out var paramType, subprogram))
+                {
+                    ExitScope();
+                    return;
+                }
+
+                foreach (var _ in param.Names)
+                {
+                    paramTypes.Add(paramType);
+                }
+            }
 
             // Vytvořit typ funkce
-            var functionType = LLVMTypeRef.CreateFunction(returnType, paramTypes);
+            var functionType = LLVMTypeRef.CreateFunction(returnType, paramTypes.ToArray());
 
             // Vytvořit funkci
             var function = module.AddFunction(subprogram.Name, functionType);
@@ -350,15 +512,20 @@ namespace BTEJA_SemestralniPrace
             int paramIndex = 0;
             foreach (var param in subprogram.Parameters)
             {
+                if (!TryGetLLVMType(param.Type, out var paramType, subprogram))
+                {
+                    continue;
+                }
+
                 foreach (var name in param.Names)
                 {
                     var paramValue = function.GetParam((uint)paramIndex);
                     paramValue.Name = name;
 
                     // Alokovat prostor pro parametr a uložit hodnotu
-                    var alloca = builder.BuildAlloca(GetLLVMType(param.Type), name);
+                    var alloca = builder.BuildAlloca(paramType, name);
                     builder.BuildStore(paramValue, alloca);
-                    AddVariable(name, alloca);
+                    AddVariable(name, alloca, subprogram);
 
                     paramIndex++;
                 }
@@ -388,6 +555,7 @@ namespace BTEJA_SemestralniPrace
                     // Pro funkce bez return vrátit výchozí hodnotu
                     var defaultValue = GetDefaultValue(returnType);
                     builder.BuildRet(defaultValue);
+                    AddWarning($"Funkce '{subprogram.Name}' nemá explicitní return statement, použita výchozí hodnota", subprogram);
                 }
             }
 
@@ -396,19 +564,32 @@ namespace BTEJA_SemestralniPrace
 
         private void GenerateDeclaration(Declaration decl)
         {
+            if (decl == null)
+            {
+                AddError("Deklarace je null");
+                return;
+            }
+
             switch (decl)
             {
                 case VariableDeclaration varDecl:
                     foreach (var name in varDecl.Names)
                     {
-                        var type = GetLLVMType(varDecl.Type);
+                        if (!TryGetLLVMType(varDecl.Type, out var type, decl))
+                        {
+                            continue;
+                        }
+
                         var alloca = builder.BuildAlloca(type, name);
-                        AddVariable(name, alloca);
+                        AddVariable(name, alloca, decl);
 
                         if (varDecl.Initializer != null)
                         {
                             var initValue = GenerateExpression(varDecl.Initializer);
-                            builder.BuildStore(initValue, alloca);
+                            if (initValue.Handle != IntPtr.Zero)
+                            {
+                                builder.BuildStore(initValue, alloca);
+                            }
                         }
                         else
                         {
@@ -431,9 +612,24 @@ namespace BTEJA_SemestralniPrace
 
         private void GenerateTypeDefinition(string name, TypeDefinition definition)
         {
+            if (definition == null)
+            {
+                AddError($"Definice typu '{name}' je null");
+                return;
+            }
+
+            // Kontrola kolize názvu typu
+            if (namedTypes.ContainsKey(name))
+            {
+                AddWarning($"Typ '{name}' je již definován a bude přepsán", definition);
+            }
+
             if (definition is ArrayTypeDefinition arrayDef)
             {
-                var elementType = GetLLVMType(arrayDef.ElementType);
+                if (!TryGetLLVMType(arrayDef.ElementType, out var elementType, definition))
+                {
+                    return;
+                }
 
                 // Vypočítat celkovou velikost pole pro každou dimenzi
                 var dimensions = new List<uint>();
@@ -442,12 +638,18 @@ namespace BTEJA_SemestralniPrace
                     // Zjednodušení: předpokládáme konstantní rozsahy
                     if (range.Lower is IntegerLiteral lower && range.Upper is IntegerLiteral upper)
                     {
+                        if (upper.Value < lower.Value)
+                        {
+                            AddError($"Neplatný rozsah pole: horní hranice ({upper.Value}) je menší než dolní hranice ({lower.Value})", definition);
+                            return;
+                        }
+
                         uint size = (uint)(upper.Value - lower.Value + 1);
                         dimensions.Add(size);
                     }
                     else
                     {
-                        Errors.Add($"Dynamické rozsahy polí nejsou podporovány");
+                        AddError($"Dynamické rozsahy polí nejsou podporovány", definition);
                         return;
                     }
                 }
@@ -466,6 +668,12 @@ namespace BTEJA_SemestralniPrace
 
         private void GenerateStatement(Statement stmt)
         {
+            if (stmt == null)
+            {
+                AddWarning("Statement je null, přeskakuji");
+                return;
+            }
+
             // Pokud blok už má terminátor, přeskočit další příkazy
             if (builder.InsertBlock.Terminator.Handle != IntPtr.Zero)
             {
@@ -476,7 +684,17 @@ namespace BTEJA_SemestralniPrace
             {
                 case AssignmentStatement assign:
                     var target = GetVariablePointer(assign.Target);
+                    if (target.Handle == IntPtr.Zero)
+                    {
+                        break;
+                    }
+
                     var value = GenerateExpression(assign.Value);
+                    if (value.Handle == IntPtr.Zero)
+                    {
+                        break;
+                    }
+
                     builder.BuildStore(value, target);
                     break;
 
@@ -500,7 +718,10 @@ namespace BTEJA_SemestralniPrace
                     if (ret.Value != null)
                     {
                         var retValue = GenerateExpression(ret.Value);
-                        builder.BuildRet(retValue);
+                        if (retValue.Handle != IntPtr.Zero)
+                        {
+                            builder.BuildRet(retValue);
+                        }
                     }
                     else
                     {
@@ -515,7 +736,7 @@ namespace BTEJA_SemestralniPrace
                     }
                     else
                     {
-                        throw new Exception("Exit příkaz mimo loop");
+                        AddError("Exit příkaz mimo loop", exit);
                     }
                     break;
             }
@@ -524,6 +745,11 @@ namespace BTEJA_SemestralniPrace
         private void GenerateIfStatement(IfStatement ifStmt)
         {
             var condition = GenerateExpression(ifStmt.Condition);
+            if (condition.Handle == IntPtr.Zero)
+            {
+                return;
+            }
+
             var condBool = builder.BuildICmp(LLVMIntPredicate.LLVMIntNE, condition,
                 LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false), "ifcond");
 
@@ -564,6 +790,11 @@ namespace BTEJA_SemestralniPrace
                 {
                     var elsif = ifStmt.ElsifClauses[i];
                     var elsifCond = GenerateExpression(elsif.Condition);
+                    if (elsifCond.Handle == IntPtr.Zero)
+                    {
+                        continue;
+                    }
+
                     var elsifCondBool = builder.BuildICmp(LLVMIntPredicate.LLVMIntNE, elsifCond,
                         LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false), "elsifcond");
 
@@ -644,11 +875,17 @@ namespace BTEJA_SemestralniPrace
 
             // Alokovat iterátor
             var iteratorAlloca = builder.BuildAlloca(LLVMTypeRef.Int32, forStmt.Iterator);
-            AddVariable(forStmt.Iterator, iteratorAlloca);
+            AddVariable(forStmt.Iterator, iteratorAlloca, forStmt);
 
             // Vyhodnotit hranice
             var startValue = GenerateExpression(forStmt.LowerBound);
             var endValue = GenerateExpression(forStmt.UpperBound);
+
+            if (startValue.Handle == IntPtr.Zero || endValue.Handle == IntPtr.Zero)
+            {
+                ExitScope();
+                return;
+            }
 
             // Uložit do lokálních proměnných
             var endAlloca = builder.BuildAlloca(LLVMTypeRef.Int32, "loop_end");
@@ -712,10 +949,24 @@ namespace BTEJA_SemestralniPrace
         {
             if (!declaredFunctions.TryGetValue(call.Name, out var funcInfo))
             {
-                throw new Exception($"Funkce '{call.Name}' nebyla deklarována");
+                AddError($"Funkce '{call.Name}' nebyla deklarována", call);
+                return;
             }
 
             var args = call.Arguments.Select(GenerateExpression).ToArray();
+
+            // Kontrola počtu argumentů
+            if (funcInfo.Type.ParamTypesCount != args.Length)
+            {
+                AddWarning($"Funkce '{call.Name}' očekává {funcInfo.Type.ParamTypesCount} argumentů, ale bylo poskytnuto {args.Length}", call);
+            }
+
+            // Filtrovat neplatné argumenty
+            if (args.Any(a => a.Handle == IntPtr.Zero))
+            {
+                AddError($"Některé argumenty volání '{call.Name}' jsou neplatné", call);
+                return;
+            }
 
             // Pro builtin funkce použít speciální generování
             if (funcInfo.IsBuiltin)
@@ -732,6 +983,9 @@ namespace BTEJA_SemestralniPrace
         {
             var printf = declaredFunctions["printf"].Function;
             var sprintf = declaredFunctions["sprintf"].Function;
+            var scanf = declaredFunctions["scanf"].Function;
+            var fgets = declaredFunctions["fgets"].Function;
+            var stdin = module.GetNamedGlobal("stdin");
 
             switch (funcInfo.Name)
             {
@@ -772,35 +1026,47 @@ namespace BTEJA_SemestralniPrace
                     builder.BuildCall2(printf.TypeOf.ElementType, printf, new[] { nlFormat }, "");
                     break;
 
-                case "Integer_To_String":
-                    // Nevracíme hodnotu, protože procedura nemá return
-                    // Vytvoříme globální buffer pro konverzi
+                case "Get_Line":
+                    // fgets(buffer, size, stdin)
+                    if (args.Length > 0)
+                    {
+                        var bufferSize = LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 256, false);
+                        var stdinPtr = builder.BuildLoad2(LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0), stdin, "stdin");
+                        builder.BuildCall2(fgets.TypeOf.ElementType, fgets,
+                            new[] { args[0], bufferSize, stdinPtr }, "");
+                    }
                     break;
 
-                case "Real_To_String":
-                    // Podobně jako Integer_To_String
+                case "Get":
+                    // scanf("%d", &value)
+                    if (args.Length > 0)
+                    {
+                        var format = builder.BuildGlobalStringPtr("%d", "scanf_fmt");
+                        builder.BuildCall2(scanf.TypeOf.ElementType, scanf,
+                            new[] { format, args[0] }, "");
+                    }
                     break;
 
-                case "String_To_Integer":
-                    // Neprovádíme nic - toto by mělo být ve výrazu
-                    break;
-
-                case "String_To_Real":
-                    // Neprovádíme nic - toto by mělo být ve výrazu
-                    break;
-
-                case "Integer_To_Real":
-                    // Konverze - neprovádíme nic ve volání procedury
-                    break;
-
-                case "Real_To_Integer":
-                    // Konverze - neprovádíme nic ve volání procedury
+                case "Get_Real":
+                    // scanf("%lf", &value)
+                    if (args.Length > 0)
+                    {
+                        var format = builder.BuildGlobalStringPtr("%lf", "scanf_fmt");
+                        builder.BuildCall2(scanf.TypeOf.ElementType, scanf,
+                            new[] { format, args[0] }, "");
+                    }
                     break;
             }
         }
 
         private LLVMValueRef GenerateExpression(Expression expr)
         {
+            if (expr == null)
+            {
+                AddError("Výraz je null");
+                return LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
+            }
+
             switch (expr)
             {
                 case IntegerLiteral intLit:
@@ -814,7 +1080,16 @@ namespace BTEJA_SemestralniPrace
 
                 case Variable variable:
                     var ptr = GetVariablePointer(variable);
-                    var varType = GetVariableType(variable);
+                    if (ptr.Handle == IntPtr.Zero)
+                    {
+                        return LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
+                    }
+
+                    if (!TryGetVariableType(variable, out var varType))
+                    {
+                        return LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
+                    }
+
                     return builder.BuildLoad2(varType, ptr, variable.Name);
 
                 case BinaryExpression binary:
@@ -827,7 +1102,8 @@ namespace BTEJA_SemestralniPrace
                     return GenerateFunctionCall(funcCall);
 
                 default:
-                    throw new NotImplementedException($"Expression type {expr.GetType()} not implemented");
+                    AddError($"Nepodporovaný typ výrazu: {expr.GetType()}", expr);
+                    return LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
             }
         }
 
@@ -848,10 +1124,19 @@ namespace BTEJA_SemestralniPrace
             // Běžné volání funkce
             if (!declaredFunctions.TryGetValue(funcCall.Name, out var funcInfo))
             {
-                throw new Exception($"Funkce '{funcCall.Name}' nebyla deklarována");
+                AddError($"Funkce '{funcCall.Name}' nebyla deklarována", funcCall);
+                return LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
             }
 
             var funcArgs = funcCall.Arguments.Select(GenerateExpression).ToArray();
+
+            // Kontrola neplatných argumentů
+            if (funcArgs.Any(a => a.Handle == IntPtr.Zero))
+            {
+                AddError($"Některé argumenty volání '{funcCall.Name}' jsou neplatné", funcCall);
+                return LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
+            }
+
             return builder.BuildCall2(funcInfo.Type, funcInfo.Function, funcArgs, "calltmp");
         }
 
@@ -871,6 +1156,12 @@ namespace BTEJA_SemestralniPrace
         private LLVMValueRef GenerateConversionCall(FunctionCall funcCall)
         {
             var args = funcCall.Arguments.Select(GenerateExpression).ToArray();
+
+            if (args.Any(a => a.Handle == IntPtr.Zero))
+            {
+                AddError($"Neplatné argumenty pro konverzní funkci '{funcCall.Name}'", funcCall);
+                return LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
+            }
 
             switch (funcCall.Name)
             {
@@ -915,7 +1206,8 @@ namespace BTEJA_SemestralniPrace
                     return builder.BuildFPToSI(args[0], LLVMTypeRef.Int32, "r2i");
 
                 default:
-                    throw new Exception($"Neznámá konverzní funkce: {funcCall.Name}");
+                    AddError($"Neznámá konverzní funkce: {funcCall.Name}", funcCall);
+                    return LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
             }
         }
 
@@ -923,10 +1215,17 @@ namespace BTEJA_SemestralniPrace
         {
             if (!declaredFunctions.TryGetValue(funcCall.Name, out var mathFunc))
             {
-                throw new Exception($"Matematická funkce '{funcCall.Name}' nebyla deklarována");
+                AddError($"Matematická funkce '{funcCall.Name}' nebyla deklarována", funcCall);
+                return LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
             }
 
             var args = funcCall.Arguments.Select(GenerateExpression).ToArray();
+
+            if (args.Any(a => a.Handle == IntPtr.Zero))
+            {
+                AddError($"Neplatné argumenty pro matematickou funkci '{funcCall.Name}'", funcCall);
+                return LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
+            }
 
             // Konvertovat argumenty na double pokud jsou integer
             for (int i = 0; i < args.Length; i++)
@@ -944,6 +1243,11 @@ namespace BTEJA_SemestralniPrace
         {
             var left = GenerateExpression(binary.Left);
             var right = GenerateExpression(binary.Right);
+
+            if (left.Handle == IntPtr.Zero || right.Handle == IntPtr.Zero)
+            {
+                return LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
+            }
 
             // Konverze typů pokud je potřeba
             if (left.TypeOf.Kind != right.TypeOf.Kind)
@@ -1026,13 +1330,19 @@ namespace BTEJA_SemestralniPrace
                     return builder.BuildOr(left, right, "ortmp");
 
                 default:
-                    throw new NotImplementedException($"Binary operator {binary.Operator} not implemented");
+                    AddError($"Nepodporovaný binární operátor: {binary.Operator}", binary);
+                    return LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
             }
         }
 
         private LLVMValueRef GenerateUnaryExpression(UnaryExpression unary)
         {
             var operand = GenerateExpression(unary.Operand);
+
+            if (operand.Handle == IntPtr.Zero)
+            {
+                return LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
+            }
 
             switch (unary.Operator)
             {
@@ -1048,7 +1358,8 @@ namespace BTEJA_SemestralniPrace
                     return builder.BuildNot(operand, "nottmp");
 
                 default:
-                    throw new NotImplementedException($"Unary operator {unary.Operator} not implemented");
+                    AddError($"Nepodporovaný unární operátor: {unary.Operator}", unary);
+                    return LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false);
             }
         }
 
@@ -1056,7 +1367,8 @@ namespace BTEJA_SemestralniPrace
         {
             if (!TryGetVariable(variable.Name, out var value))
             {
-                throw new Exception($"Proměnná '{variable.Name}' nebyla nalezena");
+                AddError($"Proměnná '{variable.Name}' nebyla nalezena", variable);
+                return default;
             }
 
             if (variable.ArrayIndices != null && variable.ArrayIndices.Count > 0)
@@ -1093,7 +1405,21 @@ namespace BTEJA_SemestralniPrace
                     LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false)
                 };
                 indices.AddRange(variable.ArrayIndices.Select(GenerateExpression));
+
+                if (indices.Any(i => i.Handle == IntPtr.Zero))
+                {
+                    AddError($"Neplatné indexy pole pro '{variable.Name}'", variable);
+                    return default;
+                }
+
                 return builder.BuildGEP2(arrayType, arrayPtr, indices.ToArray(), "arrayidx");
+            }
+
+            // Kontrola počtu dimenzí
+            if (variable.ArrayIndices.Count != arrayDef.IndexRanges.Count)
+            {
+                AddError($"Pole '{variable.Name}' má {arrayDef.IndexRanges.Count} dimenzí, ale bylo poskytnuto {variable.ArrayIndices.Count} indexů", variable);
+                return default;
             }
 
             // Vytvoření indexů s úpravou na 0-based
@@ -1104,6 +1430,12 @@ namespace BTEJA_SemestralniPrace
             for (int i = 0; i < variable.ArrayIndices.Count; i++)
             {
                 var index = GenerateExpression(variable.ArrayIndices[i]);
+                if (index.Handle == IntPtr.Zero)
+                {
+                    AddError($"Neplatný index {i} pole '{variable.Name}'", variable);
+                    return default;
+                }
+
                 var range = arrayDef.IndexRanges[i];
 
                 // Ada používá custom rozsahy (např. 1..10), musíme převést na 0-based
@@ -1122,10 +1454,15 @@ namespace BTEJA_SemestralniPrace
             return builder.BuildGEP2(arrayType, arrayPtr, adjustedIndices.ToArray(), "arrayptr");
         }
 
-        private LLVMTypeRef GetVariableType(Variable variable)
+        private bool TryGetVariableType(Variable variable, out LLVMTypeRef type)
         {
-            var ptr = GetVariable(variable.Name);
-            var type = ptr.TypeOf.ElementType;
+            if (!TryGetVariable(variable.Name, out var ptr))
+            {
+                type = default;
+                return false;
+            }
+
+            type = ptr.TypeOf.ElementType;
 
             // Pro pole vrátit typ prvku
             if (variable.ArrayIndices != null && variable.ArrayIndices.Count > 0)
@@ -1139,17 +1476,19 @@ namespace BTEJA_SemestralniPrace
                 }
             }
 
-            return type;
+            return true;
         }
 
-        private LLVMTypeRef GetLLVMType(TypeName typeName)
+        private bool TryGetLLVMType(TypeName typeName, out LLVMTypeRef type, object context = null)
         {
-            if (namedTypes.TryGetValue(typeName.Name, out var type))
+            if (namedTypes.TryGetValue(typeName.Name, out type))
             {
-                return type;
+                return true;
             }
 
-            throw new Exception($"Typ '{typeName.Name}' nebyl nalezen");
+            AddError($"Typ '{typeName.Name}' nebyl nalezen", context);
+            type = default;
+            return false;
         }
 
         private LLVMValueRef GetDefaultValue(LLVMTypeRef type)
@@ -1169,17 +1508,48 @@ namespace BTEJA_SemestralniPrace
 
         public void WriteToFile(string filename)
         {
+            if (HasErrors())
+            {
+                throw new Exception($"Nelze zapsat soubor, generování obsahuje {Errors.Count} chyb");
+            }
+
             module.PrintToFile(filename);
         }
 
         public void WriteBitcodeToFile(string filename)
         {
+            if (HasErrors())
+            {
+                throw new Exception($"Nelze zapsat bitcode, generování obsahuje {Errors.Count} chyb");
+            }
+
             module.WriteBitcodeToFile(filename);
         }
 
         public string PrintToString()
         {
             return module.PrintToString();
+        }
+
+        public void PrintErrors()
+        {
+            if (Errors.Count > 0)
+            {
+                Console.WriteLine($"\n=== CHYBY ({Errors.Count}) ===");
+                foreach (var error in Errors)
+                {
+                    Console.WriteLine(error.ToString());
+                }
+            }
+
+            if (Warnings.Count > 0)
+            {
+                Console.WriteLine($"\n=== VAROVÁNÍ ({Warnings.Count}) ===");
+                foreach (var warning in Warnings)
+                {
+                    Console.WriteLine(warning.ToString());
+                }
+            }
         }
     }
 
@@ -1191,5 +1561,28 @@ namespace BTEJA_SemestralniPrace
         public string Name { get; set; }
         public bool IsBuiltin { get; set; }
         public bool NewLine { get; set; }
+    }
+
+    // Pomocné třídy pro error handling
+    public class CompilerError
+    {
+        public string Message { get; set; }
+        public string Context { get; set; }
+
+        public override string ToString()
+        {
+            return $"CHYBA [{Context}]: {Message}";
+        }
+    }
+
+    public class CompilerWarning
+    {
+        public string Message { get; set; }
+        public string Context { get; set; }
+
+        public override string ToString()
+        {
+            return $"VAROVÁNÍ [{Context}]: {Message}";
+        }
     }
 }
