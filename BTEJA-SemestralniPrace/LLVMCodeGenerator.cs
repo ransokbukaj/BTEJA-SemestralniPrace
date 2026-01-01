@@ -10,18 +10,29 @@ namespace BTEJA_SemestralniPrace
     {
         private LLVMModuleRef module;
         private LLVMBuilderRef builder;
-        private Dictionary<string, LLVMValueRef> namedValues;
-        private Dictionary<string, LLVMTypeRef> namedTypes;
         private LLVMValueRef currentFunction;
-        private Stack<Dictionary<string, LLVMValueRef>> scopeStack;
+
+        // Zásobník pro správu scopů proměnných
+        private Stack<Dictionary<string, LLVMValueRef>> variableScopes;
+
+        // Globální registry
+        private Dictionary<string, LLVMTypeRef> namedTypes;
+        private Dictionary<string, FunctionInfo> declaredFunctions;
+
+        // Pro správu loop exit pointů
+        private Stack<LLVMBasicBlockRef> loopExitBlocks;
+
+        public List<string> Errors { get; } = new List<string>();
 
         public LLVMCodeGenerator(string moduleName)
         {
             module = LLVMModuleRef.CreateWithName(moduleName);
             builder = module.Context.CreateBuilder();
-            namedValues = new Dictionary<string, LLVMValueRef>();
+
+            variableScopes = new Stack<Dictionary<string, LLVMValueRef>>();
             namedTypes = new Dictionary<string, LLVMTypeRef>();
-            scopeStack = new Stack<Dictionary<string, LLVMValueRef>>();
+            declaredFunctions = new Dictionary<string, FunctionInfo>();
+            loopExitBlocks = new Stack<LLVMBasicBlockRef>();
 
             InitializeBuiltinTypes();
             DeclareBuiltinFunctions();
@@ -42,30 +53,170 @@ namespace BTEJA_SemestralniPrace
                 new[] { LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0) },
                 true
             );
-            module.AddFunction("printf", printfType);
+            var printfFunc = module.AddFunction("printf", printfType);
+            declaredFunctions["printf"] = new FunctionInfo
+            {
+                Function = printfFunc,
+                Type = printfType,
+                Name = "printf"
+            };
 
-            // scanf pro vstup
-            var scanfType = LLVMTypeRef.CreateFunction(
-                LLVMTypeRef.Int32,
-                new[] { LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0) },
-                true
-            );
-            module.AddFunction("scanf", scanfType);
+            // Funkce pro výstup
+            DeclarePutFunction("Put_Line", true);
+            DeclarePutFunction("Put", false);
+            DeclarePutIntegerFunction();
+            DeclarePutRealFunction();
+            DeclareNewLineFunction();
 
             // Matematické funkce
-            var sqrtType = LLVMTypeRef.CreateFunction(LLVMTypeRef.Double, new[] { LLVMTypeRef.Double });
-            module.AddFunction("sqrt", sqrtType);
-
-            var sinType = LLVMTypeRef.CreateFunction(LLVMTypeRef.Double, new[] { LLVMTypeRef.Double });
-            module.AddFunction("sin", sinType);
-
-            var cosType = LLVMTypeRef.CreateFunction(LLVMTypeRef.Double, new[] { LLVMTypeRef.Double });
-            module.AddFunction("cos", cosType);
+            DeclareSimpleMathFunction("sqrt");
+            DeclareSimpleMathFunction("sin");
+            DeclareSimpleMathFunction("cos");
+            DeclareSimpleMathFunction("tan");
+            DeclareSimpleMathFunction("exp");
+            DeclareSimpleMathFunction("log");
         }
+
+        private void DeclarePutFunction(string name, bool newline)
+        {
+            var funcType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.Void,
+                new[] { LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0) }
+            );
+            var func = module.AddFunction(name, funcType);
+            declaredFunctions[name] = new FunctionInfo
+            {
+                Function = func,
+                Type = funcType,
+                Name = name,
+                IsBuiltin = true,
+                NewLine = newline
+            };
+        }
+
+        private void DeclarePutIntegerFunction()
+        {
+            var funcType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.Void,
+                new[] { LLVMTypeRef.Int32 }
+            );
+            var func = module.AddFunction("Put_Integer", funcType);
+            declaredFunctions["Put_Integer"] = new FunctionInfo
+            {
+                Function = func,
+                Type = funcType,
+                Name = "Put_Integer",
+                IsBuiltin = true
+            };
+        }
+
+        private void DeclarePutRealFunction()
+        {
+            var funcType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.Void,
+                new[] { LLVMTypeRef.Double }
+            );
+            var func = module.AddFunction("Put_Real", funcType);
+            declaredFunctions["Put_Real"] = new FunctionInfo
+            {
+                Function = func,
+                Type = funcType,
+                Name = "Put_Real",
+                IsBuiltin = true
+            };
+        }
+
+        private void DeclareNewLineFunction()
+        {
+            var funcType = LLVMTypeRef.CreateFunction(LLVMTypeRef.Void, Array.Empty<LLVMTypeRef>());
+            var func = module.AddFunction("New_Line", funcType);
+            declaredFunctions["New_Line"] = new FunctionInfo
+            {
+                Function = func,
+                Type = funcType,
+                Name = "New_Line",
+                IsBuiltin = true
+            };
+        }
+
+        private void DeclareSimpleMathFunction(string name)
+        {
+            var funcType = LLVMTypeRef.CreateFunction(LLVMTypeRef.Double, new[] { LLVMTypeRef.Double });
+            var func = module.AddFunction(name, funcType);
+            declaredFunctions[name] = new FunctionInfo
+            {
+                Function = func,
+                Type = funcType,
+                Name = name,
+                IsBuiltin = true
+            };
+        }
+
+        // === Správa scopů ===
+
+        private void EnterScope()
+        {
+            variableScopes.Push(new Dictionary<string, LLVMValueRef>());
+        }
+
+        private void ExitScope()
+        {
+            if (variableScopes.Count > 0)
+            {
+                variableScopes.Pop();
+            }
+        }
+
+        private void AddVariable(string name, LLVMValueRef value)
+        {
+            if (variableScopes.Count == 0)
+            {
+                EnterScope();
+            }
+            variableScopes.Peek()[name] = value;
+        }
+
+        private LLVMValueRef GetVariable(string name)
+        {
+            // Hledat od nejnovějšího scope k nejstaršímu
+            foreach (var scope in variableScopes)
+            {
+                if (scope.TryGetValue(name, out var value))
+                {
+                    return value;
+                }
+            }
+
+            throw new Exception($"Proměnná '{name}' nebyla nalezena");
+        }
+
+        private bool TryGetVariable(string name, out LLVMValueRef value)
+        {
+            foreach (var scope in variableScopes)
+            {
+                if (scope.TryGetValue(name, out value))
+                {
+                    return true;
+                }
+            }
+
+            value = default;
+            return false;
+        }
+
+        // === Generování kódu ===
 
         public void Generate(AST.Program program)
         {
-            GenerateSubprogram(program.MainProcedure);
+            try
+            {
+                GenerateSubprogram(program.MainProcedure);
+            }
+            catch (Exception ex)
+            {
+                Errors.Add($"Chyba při generování kódu: {ex.Message}");
+                throw;
+            }
         }
 
         private void GenerateSubprogram(SubprogramDeclaration subprogram)
@@ -95,6 +246,15 @@ namespace BTEJA_SemestralniPrace
             var function = module.AddFunction(subprogram.Name, functionType);
             currentFunction = function;
 
+            // Uložit informaci o funkci
+            declaredFunctions[subprogram.Name] = new FunctionInfo
+            {
+                Function = function,
+                Type = functionType,
+                Name = subprogram.Name,
+                IsBuiltin = false
+            };
+
             // Vytvořit základní blok
             var entryBlock = function.AppendBasicBlock("entry");
             builder.PositionAtEnd(entryBlock);
@@ -111,7 +271,7 @@ namespace BTEJA_SemestralniPrace
                     // Alokovat prostor pro parametr a uložit hodnotu
                     var alloca = builder.BuildAlloca(GetLLVMType(param.Type), name);
                     builder.BuildStore(paramValue, alloca);
-                    namedValues[name] = alloca;
+                    AddVariable(name, alloca);
 
                     paramIndex++;
                 }
@@ -130,11 +290,17 @@ namespace BTEJA_SemestralniPrace
             }
 
             // Pokud funkce nemá explicitní return, přidat ho
-            if (returnType.Kind == LLVMTypeKind.LLVMVoidTypeKind)
+            if (builder.InsertBlock.Terminator.Handle == IntPtr.Zero)
             {
-                if (!builder.InsertBlock.Terminator.Handle.Equals(IntPtr.Zero))
+                if (returnType.Kind == LLVMTypeKind.LLVMVoidTypeKind)
                 {
                     builder.BuildRetVoid();
+                }
+                else
+                {
+                    // Pro funkce bez return vrátit výchozí hodnotu
+                    var defaultValue = GetDefaultValue(returnType);
+                    builder.BuildRet(defaultValue);
                 }
             }
 
@@ -150,12 +316,18 @@ namespace BTEJA_SemestralniPrace
                     {
                         var type = GetLLVMType(varDecl.Type);
                         var alloca = builder.BuildAlloca(type, name);
-                        namedValues[name] = alloca;
+                        AddVariable(name, alloca);
 
                         if (varDecl.Initializer != null)
                         {
                             var initValue = GenerateExpression(varDecl.Initializer);
                             builder.BuildStore(initValue, alloca);
+                        }
+                        else
+                        {
+                            // Inicializovat na výchozí hodnotu
+                            var defaultValue = GetDefaultValue(type);
+                            builder.BuildStore(defaultValue, alloca);
                         }
                     }
                     break;
@@ -176,24 +348,41 @@ namespace BTEJA_SemestralniPrace
             {
                 var elementType = GetLLVMType(arrayDef.ElementType);
 
-                // Vypočítat celkovou velikost pole
-                uint totalSize = 1;
+                // Vypočítat celkovou velikost pole pro každou dimenzi
+                var dimensions = new List<uint>();
                 foreach (var range in arrayDef.IndexRanges)
                 {
                     // Zjednodušení: předpokládáme konstantní rozsahy
                     if (range.Lower is IntegerLiteral lower && range.Upper is IntegerLiteral upper)
                     {
-                        totalSize *= (uint)(upper.Value - lower.Value + 1);
+                        uint size = (uint)(upper.Value - lower.Value + 1);
+                        dimensions.Add(size);
+                    }
+                    else
+                    {
+                        throw new Exception($"Dynamické rozsahy polí nejsou podporovány");
                     }
                 }
 
-                var arrayType = LLVMTypeRef.CreateArray(elementType, totalSize);
+                // Vytvořit typ pole - vnořené pole pro vícerozměrná pole
+                LLVMTypeRef arrayType = elementType;
+                for (int i = dimensions.Count - 1; i >= 0; i--)
+                {
+                    arrayType = LLVMTypeRef.CreateArray(arrayType, dimensions[i]);
+                }
+
                 namedTypes[name] = arrayType;
             }
         }
 
         private void GenerateStatement(Statement stmt)
         {
+            // Pokud blok už má terminátor, přeskočit další příkazy
+            if (builder.InsertBlock.Terminator.Handle != IntPtr.Zero)
+            {
+                return;
+            }
+
             switch (stmt)
             {
                 case AssignmentStatement assign:
@@ -231,8 +420,14 @@ namespace BTEJA_SemestralniPrace
                     break;
 
                 case ExitStatement exit:
-                    // Implementace exit pro loop
-                    // TODO: potřebujeme sledovat aktuální loop context
+                    if (loopExitBlocks.Count > 0)
+                    {
+                        builder.BuildBr(loopExitBlocks.Peek());
+                    }
+                    else
+                    {
+                        throw new Exception("Exit příkaz mimo loop");
+                    }
                     break;
             }
         }
@@ -244,8 +439,18 @@ namespace BTEJA_SemestralniPrace
                 LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false), "ifcond");
 
             var thenBlock = currentFunction.AppendBasicBlock("then");
-            var elseBlock = currentFunction.AppendBasicBlock("else");
             var mergeBlock = currentFunction.AppendBasicBlock("ifcont");
+
+            // Pokud jsou elsif nebo else větve, vytvoříme další bloky
+            LLVMBasicBlockRef elseBlock;
+            if (ifStmt.ElsifClauses.Count > 0 || ifStmt.ElseStatements.Count > 0)
+            {
+                elseBlock = currentFunction.AppendBasicBlock("else");
+            }
+            else
+            {
+                elseBlock = mergeBlock;
+            }
 
             builder.BuildCondBr(condBool, thenBlock, elseBlock);
 
@@ -255,24 +460,64 @@ namespace BTEJA_SemestralniPrace
             {
                 GenerateStatement(stmt);
             }
-            if (builder.InsertBlock.Terminator.Handle.Equals(IntPtr.Zero))
+            if (builder.InsertBlock.Terminator.Handle == IntPtr.Zero)
             {
                 builder.BuildBr(mergeBlock);
             }
 
-            // Else blok (včetně elsif)
-            builder.PositionAtEnd(elseBlock);
+            // Elsif a else bloky
             if (ifStmt.ElsifClauses.Count > 0 || ifStmt.ElseStatements.Count > 0)
             {
-                // TODO: Implementovat elsif
-                foreach (var stmt in ifStmt.ElseStatements)
+                builder.PositionAtEnd(elseBlock);
+
+                // Zpracovat elsif klauzule
+                for (int i = 0; i < ifStmt.ElsifClauses.Count; i++)
                 {
-                    GenerateStatement(stmt);
+                    var elsif = ifStmt.ElsifClauses[i];
+                    var elsifCond = GenerateExpression(elsif.Condition);
+                    var elsifCondBool = builder.BuildICmp(LLVMIntPredicate.LLVMIntNE, elsifCond,
+                        LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false), "elsifcond");
+
+                    var elsifThen = currentFunction.AppendBasicBlock("elsif_then");
+                    LLVMBasicBlockRef nextElsif;
+
+                    if (i < ifStmt.ElsifClauses.Count - 1 || ifStmt.ElseStatements.Count > 0)
+                    {
+                        nextElsif = currentFunction.AppendBasicBlock("next_elsif");
+                    }
+                    else
+                    {
+                        nextElsif = mergeBlock;
+                    }
+
+                    builder.BuildCondBr(elsifCondBool, elsifThen, nextElsif);
+
+                    builder.PositionAtEnd(elsifThen);
+                    foreach (var stmt in elsif.Statements)
+                    {
+                        GenerateStatement(stmt);
+                    }
+                    if (builder.InsertBlock.Terminator.Handle == IntPtr.Zero)
+                    {
+                        builder.BuildBr(mergeBlock);
+                    }
+
+                    builder.PositionAtEnd(nextElsif);
                 }
-            }
-            if (builder.InsertBlock.Terminator.Handle.Equals(IntPtr.Zero))
-            {
-                builder.BuildBr(mergeBlock);
+
+                // Zpracovat else větev
+                if (ifStmt.ElseStatements.Count > 0)
+                {
+                    foreach (var stmt in ifStmt.ElseStatements)
+                    {
+                        GenerateStatement(stmt);
+                    }
+                }
+
+                if (builder.InsertBlock.Terminator.Handle == IntPtr.Zero)
+                {
+                    builder.BuildBr(mergeBlock);
+                }
             }
 
             builder.PositionAtEnd(mergeBlock);
@@ -283,6 +528,9 @@ namespace BTEJA_SemestralniPrace
             var loopBlock = currentFunction.AppendBasicBlock("loop");
             var afterBlock = currentFunction.AppendBasicBlock("afterloop");
 
+            // Přidat exit point pro tento loop
+            loopExitBlocks.Push(afterBlock);
+
             builder.BuildBr(loopBlock);
             builder.PositionAtEnd(loopBlock);
 
@@ -291,62 +539,149 @@ namespace BTEJA_SemestralniPrace
                 GenerateStatement(stmt);
             }
 
-            builder.BuildBr(loopBlock);
+            // Pokud blok nemá terminátor, přidat skok zpět na začátek
+            if (builder.InsertBlock.Terminator.Handle == IntPtr.Zero)
+            {
+                builder.BuildBr(loopBlock);
+            }
+
+            loopExitBlocks.Pop();
             builder.PositionAtEnd(afterBlock);
         }
 
         private void GenerateForStatement(ForStatement forStmt)
         {
+            EnterScope();
+
             // Alokovat iterátor
             var iteratorAlloca = builder.BuildAlloca(LLVMTypeRef.Int32, forStmt.Iterator);
-            namedValues[forStmt.Iterator] = iteratorAlloca;
+            AddVariable(forStmt.Iterator, iteratorAlloca);
+
+            // Vyhodnotit hranice
+            var startValue = GenerateExpression(forStmt.LowerBound);
+            var endValue = GenerateExpression(forStmt.UpperBound);
+
+            // Uložit do lokálních proměnných
+            var endAlloca = builder.BuildAlloca(LLVMTypeRef.Int32, "loop_end");
+            builder.BuildStore(endValue, endAlloca);
 
             // Inicializovat iterátor
-            var startValue = GenerateExpression(forStmt.LowerBound);
             builder.BuildStore(startValue, iteratorAlloca);
 
-            var loopBlock = currentFunction.AppendBasicBlock("forloop");
-            var afterBlock = currentFunction.AppendBasicBlock("afterfor");
+            var condBlock = currentFunction.AppendBasicBlock("for_cond");
+            var loopBlock = currentFunction.AppendBasicBlock("for_body");
+            var afterBlock = currentFunction.AppendBasicBlock("for_end");
 
-            builder.BuildBr(loopBlock);
-            builder.PositionAtEnd(loopBlock);
+            // Přidat exit point
+            loopExitBlocks.Push(afterBlock);
+
+            builder.BuildBr(condBlock);
+
+            // Podmínka
+            builder.PositionAtEnd(condBlock);
+            var currentValue = builder.BuildLoad2(LLVMTypeRef.Int32, iteratorAlloca, "iter");
+            var endVal = builder.BuildLoad2(LLVMTypeRef.Int32, endAlloca, "end");
+
+            LLVMValueRef condition;
+            if (forStmt.Reverse)
+            {
+                condition = builder.BuildICmp(LLVMIntPredicate.LLVMIntSGE, currentValue, endVal, "loopcond");
+            }
+            else
+            {
+                condition = builder.BuildICmp(LLVMIntPredicate.LLVMIntSLE, currentValue, endVal, "loopcond");
+            }
+
+            builder.BuildCondBr(condition, loopBlock, afterBlock);
 
             // Tělo cyklu
+            builder.PositionAtEnd(loopBlock);
             foreach (var stmt in forStmt.Statements)
             {
                 GenerateStatement(stmt);
             }
 
             // Inkrementace/dekrementace
-            var currentValue = builder.BuildLoad2(LLVMTypeRef.Int32, iteratorAlloca, "current");
-            var nextValue = forStmt.Reverse
-                ? builder.BuildSub(currentValue, LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 1, false), "next")
-                : builder.BuildAdd(currentValue, LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 1, false), "next");
-            builder.BuildStore(nextValue, iteratorAlloca);
+            if (builder.InsertBlock.Terminator.Handle == IntPtr.Zero)
+            {
+                var iterValue = builder.BuildLoad2(LLVMTypeRef.Int32, iteratorAlloca, "iter");
+                var nextValue = forStmt.Reverse
+                    ? builder.BuildSub(iterValue, LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 1, false), "next")
+                    : builder.BuildAdd(iterValue, LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 1, false), "next");
+                builder.BuildStore(nextValue, iteratorAlloca);
 
-            // Podmínka pokračování
-            var endValue = GenerateExpression(forStmt.UpperBound);
-            var condition = forStmt.Reverse
-                ? builder.BuildICmp(LLVMIntPredicate.LLVMIntSGE, nextValue, endValue, "loopcond")
-                : builder.BuildICmp(LLVMIntPredicate.LLVMIntSLE, nextValue, endValue, "loopcond");
+                builder.BuildBr(condBlock);
+            }
 
-            builder.BuildCondBr(condition, loopBlock, afterBlock);
+            loopExitBlocks.Pop();
             builder.PositionAtEnd(afterBlock);
+
+            ExitScope();
         }
 
         private void GenerateProcedureCall(ProcedureCallStatement call)
         {
-            var function = module.GetNamedFunction(call.Name);
-            if (function.Handle == IntPtr.Zero)
+            if (!declaredFunctions.TryGetValue(call.Name, out var funcInfo))
             {
-                throw new Exception($"Unknown function: {call.Name}");
+                throw new Exception($"Funkce '{call.Name}' nebyla deklarována");
             }
 
             var args = call.Arguments.Select(GenerateExpression).ToArray();
 
-            // Získat typ funkce z LLVM typu
-            var functionType = function.TypeOf.ElementType;
-            builder.BuildCall2(functionType, function, args, "");
+            // Pro builtin funkce použít printf
+            if (funcInfo.IsBuiltin)
+            {
+                GenerateBuiltinCall(funcInfo, args);
+            }
+            else
+            {
+                builder.BuildCall2(funcInfo.Type, funcInfo.Function, args, "");
+            }
+        }
+
+        private void GenerateBuiltinCall(FunctionInfo funcInfo, LLVMValueRef[] args)
+        {
+            var printf = declaredFunctions["printf"].Function;
+
+            switch (funcInfo.Name)
+            {
+                case "Put_Line":
+                    if (args.Length > 0)
+                    {
+                        var format = builder.BuildGlobalStringPtr("%s\n", "fmt");
+                        builder.BuildCall2(printf.TypeOf.ElementType, printf, new[] { format, args[0] }, "");
+                    }
+                    break;
+
+                case "Put":
+                    if (args.Length > 0)
+                    {
+                        var format = builder.BuildGlobalStringPtr("%s", "fmt");
+                        builder.BuildCall2(printf.TypeOf.ElementType, printf, new[] { format, args[0] }, "");
+                    }
+                    break;
+
+                case "Put_Integer":
+                    if (args.Length > 0)
+                    {
+                        var format = builder.BuildGlobalStringPtr("%d", "fmt");
+                        builder.BuildCall2(printf.TypeOf.ElementType, printf, new[] { format, args[0] }, "");
+                    }
+                    break;
+
+                case "Put_Real":
+                    if (args.Length > 0)
+                    {
+                        var format = builder.BuildGlobalStringPtr("%f", "fmt");
+                        builder.BuildCall2(printf.TypeOf.ElementType, printf, new[] { format, args[0] }, "");
+                    }
+                    break;
+
+                case "New_Line":
+                    var nlFormat = builder.BuildGlobalStringPtr("\n", "fmt");
+                    builder.BuildCall2(printf.TypeOf.ElementType, printf, new[] { nlFormat }, "");
+                    break;
+            }
         }
 
         private LLVMValueRef GenerateExpression(Expression expr)
@@ -374,17 +709,13 @@ namespace BTEJA_SemestralniPrace
                     return GenerateUnaryExpression(unary);
 
                 case FunctionCall funcCall:
-                    var func = module.GetNamedFunction(funcCall.Name);
-                    if (func.Handle == IntPtr.Zero)
+                    if (!declaredFunctions.TryGetValue(funcCall.Name, out var funcInfo))
                     {
-                        throw new Exception($"Unknown function: {funcCall.Name}");
+                        throw new Exception($"Funkce '{funcCall.Name}' nebyla deklarována");
                     }
 
                     var funcArgs = funcCall.Arguments.Select(GenerateExpression).ToArray();
-
-                    // Získat typ funkce z LLVM typu
-                    var funcType = func.TypeOf.ElementType;
-                    return builder.BuildCall2(funcType, func, funcArgs, "calltmp");
+                    return builder.BuildCall2(funcInfo.Type, funcInfo.Function, funcArgs, "calltmp");
 
                 default:
                     throw new NotImplementedException($"Expression type {expr.GetType()} not implemented");
@@ -396,45 +727,84 @@ namespace BTEJA_SemestralniPrace
             var left = GenerateExpression(binary.Left);
             var right = GenerateExpression(binary.Right);
 
+            // Konverze typů pokud je potřeba
+            if (left.TypeOf.Kind != right.TypeOf.Kind)
+            {
+                if (left.TypeOf.Kind == LLVMTypeKind.LLVMIntegerTypeKind && right.TypeOf.Kind == LLVMTypeKind.LLVMDoubleTypeKind)
+                {
+                    left = builder.BuildSIToFP(left, LLVMTypeRef.Double, "inttofp");
+                }
+                else if (left.TypeOf.Kind == LLVMTypeKind.LLVMDoubleTypeKind && right.TypeOf.Kind == LLVMTypeKind.LLVMIntegerTypeKind)
+                {
+                    right = builder.BuildSIToFP(right, LLVMTypeRef.Double, "inttofp");
+                }
+            }
+
+            bool isFloat = left.TypeOf.Kind == LLVMTypeKind.LLVMDoubleTypeKind;
+
             switch (binary.Operator)
             {
                 case BinaryOperator.Add:
-                    return left.TypeOf.Kind == LLVMTypeKind.LLVMDoubleTypeKind || right.TypeOf.Kind == LLVMTypeKind.LLVMDoubleTypeKind
-                        ? builder.BuildFAdd(left, right, "addtmp")
-                        : builder.BuildAdd(left, right, "addtmp");
+                    return isFloat ? builder.BuildFAdd(left, right, "addtmp") : builder.BuildAdd(left, right, "addtmp");
 
                 case BinaryOperator.Subtract:
-                    return left.TypeOf.Kind == LLVMTypeKind.LLVMDoubleTypeKind || right.TypeOf.Kind == LLVMTypeKind.LLVMDoubleTypeKind
-                        ? builder.BuildFSub(left, right, "subtmp")
-                        : builder.BuildSub(left, right, "subtmp");
+                    return isFloat ? builder.BuildFSub(left, right, "subtmp") : builder.BuildSub(left, right, "subtmp");
 
                 case BinaryOperator.Multiply:
-                    return left.TypeOf.Kind == LLVMTypeKind.LLVMDoubleTypeKind || right.TypeOf.Kind == LLVMTypeKind.LLVMDoubleTypeKind
-                        ? builder.BuildFMul(left, right, "multmp")
-                        : builder.BuildMul(left, right, "multmp");
+                    return isFloat ? builder.BuildFMul(left, right, "multmp") : builder.BuildMul(left, right, "multmp");
 
                 case BinaryOperator.Divide:
-                    return left.TypeOf.Kind == LLVMTypeKind.LLVMDoubleTypeKind || right.TypeOf.Kind == LLVMTypeKind.LLVMDoubleTypeKind
-                        ? builder.BuildFDiv(left, right, "divtmp")
-                        : builder.BuildSDiv(left, right, "divtmp");
+                    return isFloat ? builder.BuildFDiv(left, right, "divtmp") : builder.BuildSDiv(left, right, "divtmp");
+
+                case BinaryOperator.Mod:
+                    return builder.BuildSRem(left, right, "modtmp");
+
+                case BinaryOperator.Power:
+                    // Pro mocninu použijeme pow funkci
+                    var powFunc = module.GetNamedFunction("pow");
+                    if (powFunc.Handle == IntPtr.Zero)
+                    {
+                        var powType = LLVMTypeRef.CreateFunction(LLVMTypeRef.Double, new[] { LLVMTypeRef.Double, LLVMTypeRef.Double });
+                        powFunc = module.AddFunction("pow", powType);
+                    }
+
+                    if (!isFloat)
+                    {
+                        left = builder.BuildSIToFP(left, LLVMTypeRef.Double, "powleft");
+                        right = builder.BuildSIToFP(right, LLVMTypeRef.Double, "powright");
+                    }
+
+                    return builder.BuildCall2(powFunc.TypeOf.ElementType, powFunc, new[] { left, right }, "powtmp");
 
                 case BinaryOperator.Equal:
-                    return builder.BuildICmp(LLVMIntPredicate.LLVMIntEQ, left, right, "eqtmp");
+                    return isFloat
+                        ? builder.BuildFCmp(LLVMRealPredicate.LLVMRealOEQ, left, right, "eqtmp")
+                        : builder.BuildICmp(LLVMIntPredicate.LLVMIntEQ, left, right, "eqtmp");
 
                 case BinaryOperator.NotEqual:
-                    return builder.BuildICmp(LLVMIntPredicate.LLVMIntNE, left, right, "netmp");
+                    return isFloat
+                        ? builder.BuildFCmp(LLVMRealPredicate.LLVMRealONE, left, right, "netmp")
+                        : builder.BuildICmp(LLVMIntPredicate.LLVMIntNE, left, right, "netmp");
 
                 case BinaryOperator.Less:
-                    return builder.BuildICmp(LLVMIntPredicate.LLVMIntSLT, left, right, "lttmp");
+                    return isFloat
+                        ? builder.BuildFCmp(LLVMRealPredicate.LLVMRealOLT, left, right, "lttmp")
+                        : builder.BuildICmp(LLVMIntPredicate.LLVMIntSLT, left, right, "lttmp");
 
                 case BinaryOperator.LessOrEqual:
-                    return builder.BuildICmp(LLVMIntPredicate.LLVMIntSLE, left, right, "letmp");
+                    return isFloat
+                        ? builder.BuildFCmp(LLVMRealPredicate.LLVMRealOLE, left, right, "letmp")
+                        : builder.BuildICmp(LLVMIntPredicate.LLVMIntSLE, left, right, "letmp");
 
                 case BinaryOperator.Greater:
-                    return builder.BuildICmp(LLVMIntPredicate.LLVMIntSGT, left, right, "gttmp");
+                    return isFloat
+                        ? builder.BuildFCmp(LLVMRealPredicate.LLVMRealOGT, left, right, "gttmp")
+                        : builder.BuildICmp(LLVMIntPredicate.LLVMIntSGT, left, right, "gttmp");
 
                 case BinaryOperator.GreaterOrEqual:
-                    return builder.BuildICmp(LLVMIntPredicate.LLVMIntSGE, left, right, "getmp");
+                    return isFloat
+                        ? builder.BuildFCmp(LLVMRealPredicate.LLVMRealOGE, left, right, "getmp")
+                        : builder.BuildICmp(LLVMIntPredicate.LLVMIntSGE, left, right, "getmp");
 
                 case BinaryOperator.And:
                     return builder.BuildAnd(left, right, "andtmp");
@@ -471,17 +841,17 @@ namespace BTEJA_SemestralniPrace
 
         private LLVMValueRef GetVariablePointer(Variable variable)
         {
-            if (!namedValues.TryGetValue(variable.Name, out var value))
+            if (!TryGetVariable(variable.Name, out var value))
             {
-                throw new Exception($"Unknown variable: {variable.Name}");
+                throw new Exception($"Proměnná '{variable.Name}' nebyla nalezena");
             }
 
             if (variable.ArrayIndices != null && variable.ArrayIndices.Count > 0)
             {
-                // Přístup k poli
+                // Přístup k poli - budeme řešit v dalším kroku
                 var indices = new List<LLVMValueRef> { LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false) };
                 indices.AddRange(variable.ArrayIndices.Select(GenerateExpression));
-                return builder.BuildGEP2(value.TypeOf, value, indices.ToArray(), "arrayidx");
+                return builder.BuildGEP2(value.TypeOf.ElementType, value, indices.ToArray(), "arrayidx");
             }
 
             return value;
@@ -489,8 +859,22 @@ namespace BTEJA_SemestralniPrace
 
         private LLVMTypeRef GetVariableType(Variable variable)
         {
-            var ptr = namedValues[variable.Name];
-            return ptr.TypeOf.ElementType;
+            var ptr = GetVariable(variable.Name);
+            var type = ptr.TypeOf.ElementType;
+
+            // Pro pole vrátit typ prvku
+            if (variable.ArrayIndices != null && variable.ArrayIndices.Count > 0)
+            {
+                for (int i = 0; i < variable.ArrayIndices.Count; i++)
+                {
+                    if (type.Kind == LLVMTypeKind.LLVMArrayTypeKind)
+                    {
+                        type = type.ElementType;
+                    }
+                }
+            }
+
+            return type;
         }
 
         private LLVMTypeRef GetLLVMType(TypeName typeName)
@@ -500,17 +884,22 @@ namespace BTEJA_SemestralniPrace
                 return type;
             }
 
-            throw new Exception($"Unknown type: {typeName.Name}");
+            throw new Exception($"Typ '{typeName.Name}' nebyl nalezen");
         }
 
-        private void EnterScope()
+        private LLVMValueRef GetDefaultValue(LLVMTypeRef type)
         {
-            scopeStack.Push(new Dictionary<string, LLVMValueRef>(namedValues));
-        }
-
-        private void ExitScope()
-        {
-            namedValues = scopeStack.Pop();
+            switch (type.Kind)
+            {
+                case LLVMTypeKind.LLVMIntegerTypeKind:
+                    return LLVMValueRef.CreateConstInt(type, 0, false);
+                case LLVMTypeKind.LLVMDoubleTypeKind:
+                    return LLVMValueRef.CreateConstReal(type, 0.0);
+                case LLVMTypeKind.LLVMPointerTypeKind:
+                    return LLVMValueRef.CreateConstPointerNull(type);
+                default:
+                    return LLVMValueRef.CreateConstNull(type);
+            }
         }
 
         public void WriteToFile(string filename)
@@ -527,5 +916,15 @@ namespace BTEJA_SemestralniPrace
         {
             return module.PrintToString();
         }
+    }
+
+    // Pomocná třída pro informace o funkcích
+    internal class FunctionInfo
+    {
+        public LLVMValueRef Function { get; set; }
+        public LLVMTypeRef Type { get; set; }
+        public string Name { get; set; }
+        public bool IsBuiltin { get; set; }
+        public bool NewLine { get; set; }
     }
 }
