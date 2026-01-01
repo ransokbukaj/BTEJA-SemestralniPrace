@@ -18,9 +18,13 @@ namespace BTEJA_SemestralniPrace
         // Globální registry
         private Dictionary<string, LLVMTypeRef> namedTypes;
         private Dictionary<string, FunctionInfo> declaredFunctions;
+        private Dictionary<string, ArrayTypeDefinition> arrayDefinitions;
 
         // Pro správu loop exit pointů
         private Stack<LLVMBasicBlockRef> loopExitBlocks;
+
+        // Reference na SemanticAnalyzer pro přístup k symbol table
+        private SymbolTable symbolTable;
 
         public List<string> Errors { get; } = new List<string>();
 
@@ -32,10 +36,16 @@ namespace BTEJA_SemestralniPrace
             variableScopes = new Stack<Dictionary<string, LLVMValueRef>>();
             namedTypes = new Dictionary<string, LLVMTypeRef>();
             declaredFunctions = new Dictionary<string, FunctionInfo>();
+            arrayDefinitions = new Dictionary<string, ArrayTypeDefinition>();
             loopExitBlocks = new Stack<LLVMBasicBlockRef>();
 
             InitializeBuiltinTypes();
             DeclareBuiltinFunctions();
+        }
+
+        public void SetSymbolTable(SymbolTable table)
+        {
+            symbolTable = table;
         }
 
         private void InitializeBuiltinTypes()
@@ -61,12 +71,62 @@ namespace BTEJA_SemestralniPrace
                 Name = "printf"
             };
 
+            // sprintf pro konverze
+            var sprintfType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.Int32,
+                new[] {
+                    LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0),
+                    LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0)
+                },
+                true
+            );
+            var sprintfFunc = module.AddFunction("sprintf", sprintfType);
+            declaredFunctions["sprintf"] = new FunctionInfo
+            {
+                Function = sprintfFunc,
+                Type = sprintfType,
+                Name = "sprintf"
+            };
+
+            // atoi, atof pro konverze ze stringu
+            var atoiType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.Int32,
+                new[] { LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0) }
+            );
+            var atoiFunc = module.AddFunction("atoi", atoiType);
+            declaredFunctions["atoi"] = new FunctionInfo
+            {
+                Function = atoiFunc,
+                Type = atoiType,
+                Name = "atoi"
+            };
+
+            var atofType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.Double,
+                new[] { LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0) }
+            );
+            var atofFunc = module.AddFunction("atof", atofType);
+            declaredFunctions["atof"] = new FunctionInfo
+            {
+                Function = atofFunc,
+                Type = atofType,
+                Name = "atof"
+            };
+
             // Funkce pro výstup
             DeclarePutFunction("Put_Line", true);
             DeclarePutFunction("Put", false);
             DeclarePutIntegerFunction();
             DeclarePutRealFunction();
             DeclareNewLineFunction();
+
+            // Konverzní funkce
+            DeclareConversionFunction("Integer_To_String", new[] { LLVMTypeRef.Int32 }, LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0));
+            DeclareConversionFunction("Real_To_String", new[] { LLVMTypeRef.Double }, LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0));
+            DeclareConversionFunction("String_To_Integer", new[] { LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0) }, LLVMTypeRef.Int32);
+            DeclareConversionFunction("String_To_Real", new[] { LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0) }, LLVMTypeRef.Double);
+            DeclareConversionFunction("Integer_To_Real", new[] { LLVMTypeRef.Int32 }, LLVMTypeRef.Double);
+            DeclareConversionFunction("Real_To_Integer", new[] { LLVMTypeRef.Double }, LLVMTypeRef.Int32);
 
             // Matematické funkce
             DeclareSimpleMathFunction("sqrt");
@@ -75,6 +135,20 @@ namespace BTEJA_SemestralniPrace
             DeclareSimpleMathFunction("tan");
             DeclareSimpleMathFunction("exp");
             DeclareSimpleMathFunction("log");
+
+            // pow má dva parametry
+            var powType = LLVMTypeRef.CreateFunction(
+                LLVMTypeRef.Double,
+                new[] { LLVMTypeRef.Double, LLVMTypeRef.Double }
+            );
+            var powFunc = module.AddFunction("pow", powType);
+            declaredFunctions["pow"] = new FunctionInfo
+            {
+                Function = powFunc,
+                Type = powType,
+                Name = "pow",
+                IsBuiltin = true
+            };
         }
 
         private void DeclarePutFunction(string name, bool newline)
@@ -135,6 +209,19 @@ namespace BTEJA_SemestralniPrace
                 Function = func,
                 Type = funcType,
                 Name = "New_Line",
+                IsBuiltin = true
+            };
+        }
+
+        private void DeclareConversionFunction(string name, LLVMTypeRef[] paramTypes, LLVMTypeRef returnType)
+        {
+            var funcType = LLVMTypeRef.CreateFunction(returnType, paramTypes);
+            var func = module.AddFunction(name, funcType);
+            declaredFunctions[name] = new FunctionInfo
+            {
+                Function = func,
+                Type = funcType,
+                Name = name,
                 IsBuiltin = true
             };
         }
@@ -360,7 +447,8 @@ namespace BTEJA_SemestralniPrace
                     }
                     else
                     {
-                        throw new Exception($"Dynamické rozsahy polí nejsou podporovány");
+                        Errors.Add($"Dynamické rozsahy polí nejsou podporovány");
+                        return;
                     }
                 }
 
@@ -372,6 +460,7 @@ namespace BTEJA_SemestralniPrace
                 }
 
                 namedTypes[name] = arrayType;
+                arrayDefinitions[name] = arrayDef;
             }
         }
 
@@ -628,7 +717,7 @@ namespace BTEJA_SemestralniPrace
 
             var args = call.Arguments.Select(GenerateExpression).ToArray();
 
-            // Pro builtin funkce použít printf
+            // Pro builtin funkce použít speciální generování
             if (funcInfo.IsBuiltin)
             {
                 GenerateBuiltinCall(funcInfo, args);
@@ -642,6 +731,7 @@ namespace BTEJA_SemestralniPrace
         private void GenerateBuiltinCall(FunctionInfo funcInfo, LLVMValueRef[] args)
         {
             var printf = declaredFunctions["printf"].Function;
+            var sprintf = declaredFunctions["sprintf"].Function;
 
             switch (funcInfo.Name)
             {
@@ -681,6 +771,31 @@ namespace BTEJA_SemestralniPrace
                     var nlFormat = builder.BuildGlobalStringPtr("\n", "fmt");
                     builder.BuildCall2(printf.TypeOf.ElementType, printf, new[] { nlFormat }, "");
                     break;
+
+                case "Integer_To_String":
+                    // Nevracíme hodnotu, protože procedura nemá return
+                    // Vytvoříme globální buffer pro konverzi
+                    break;
+
+                case "Real_To_String":
+                    // Podobně jako Integer_To_String
+                    break;
+
+                case "String_To_Integer":
+                    // Neprovádíme nic - toto by mělo být ve výrazu
+                    break;
+
+                case "String_To_Real":
+                    // Neprovádíme nic - toto by mělo být ve výrazu
+                    break;
+
+                case "Integer_To_Real":
+                    // Konverze - neprovádíme nic ve volání procedury
+                    break;
+
+                case "Real_To_Integer":
+                    // Konverze - neprovádíme nic ve volání procedury
+                    break;
             }
         }
 
@@ -709,17 +824,120 @@ namespace BTEJA_SemestralniPrace
                     return GenerateUnaryExpression(unary);
 
                 case FunctionCall funcCall:
-                    if (!declaredFunctions.TryGetValue(funcCall.Name, out var funcInfo))
-                    {
-                        throw new Exception($"Funkce '{funcCall.Name}' nebyla deklarována");
-                    }
-
-                    var funcArgs = funcCall.Arguments.Select(GenerateExpression).ToArray();
-                    return builder.BuildCall2(funcInfo.Type, funcInfo.Function, funcArgs, "calltmp");
+                    return GenerateFunctionCall(funcCall);
 
                 default:
                     throw new NotImplementedException($"Expression type {expr.GetType()} not implemented");
             }
+        }
+
+        private LLVMValueRef GenerateFunctionCall(FunctionCall funcCall)
+        {
+            // Nejprve zkontrolovat, zda to není konverzní funkce
+            if (IsConversionFunction(funcCall.Name))
+            {
+                return GenerateConversionCall(funcCall);
+            }
+
+            // Pak zkontrolovat matematické funkce
+            if (IsMathFunction(funcCall.Name))
+            {
+                return GenerateMathCall(funcCall);
+            }
+
+            // Běžné volání funkce
+            if (!declaredFunctions.TryGetValue(funcCall.Name, out var funcInfo))
+            {
+                throw new Exception($"Funkce '{funcCall.Name}' nebyla deklarována");
+            }
+
+            var funcArgs = funcCall.Arguments.Select(GenerateExpression).ToArray();
+            return builder.BuildCall2(funcInfo.Type, funcInfo.Function, funcArgs, "calltmp");
+        }
+
+        private bool IsConversionFunction(string name)
+        {
+            return name == "Integer_To_String" || name == "Real_To_String" ||
+                   name == "String_To_Integer" || name == "String_To_Real" ||
+                   name == "Integer_To_Real" || name == "Real_To_Integer";
+        }
+
+        private bool IsMathFunction(string name)
+        {
+            return name == "sqrt" || name == "sin" || name == "cos" ||
+                   name == "tan" || name == "exp" || name == "log" || name == "pow";
+        }
+
+        private LLVMValueRef GenerateConversionCall(FunctionCall funcCall)
+        {
+            var args = funcCall.Arguments.Select(GenerateExpression).ToArray();
+
+            switch (funcCall.Name)
+            {
+                case "Integer_To_String":
+                    // Alokovat buffer pro string
+                    var intBuffer = builder.BuildAlloca(
+                        LLVMTypeRef.CreateArray(LLVMTypeRef.Int8, 32), "int_str_buf");
+                    var intBufferPtr = builder.BuildBitCast(intBuffer,
+                        LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0), "bufptr");
+
+                    var intFmt = builder.BuildGlobalStringPtr("%d", "int_fmt");
+                    var sprintf = declaredFunctions["sprintf"].Function;
+                    builder.BuildCall2(sprintf.TypeOf.ElementType, sprintf,
+                        new[] { intBufferPtr, intFmt, args[0] }, "");
+                    return intBufferPtr;
+
+                case "Real_To_String":
+                    // Alokovat buffer pro string
+                    var realBuffer = builder.BuildAlloca(
+                        LLVMTypeRef.CreateArray(LLVMTypeRef.Int8, 32), "real_str_buf");
+                    var realBufferPtr = builder.BuildBitCast(realBuffer,
+                        LLVMTypeRef.CreatePointer(LLVMTypeRef.Int8, 0), "bufptr");
+
+                    var realFmt = builder.BuildGlobalStringPtr("%f", "real_fmt");
+                    var sprintfReal = declaredFunctions["sprintf"].Function;
+                    builder.BuildCall2(sprintfReal.TypeOf.ElementType, sprintfReal,
+                        new[] { realBufferPtr, realFmt, args[0] }, "");
+                    return realBufferPtr;
+
+                case "String_To_Integer":
+                    var atoi = declaredFunctions["atoi"].Function;
+                    return builder.BuildCall2(atoi.TypeOf.ElementType, atoi, args, "strtoint");
+
+                case "String_To_Real":
+                    var atof = declaredFunctions["atof"].Function;
+                    return builder.BuildCall2(atof.TypeOf.ElementType, atof, args, "strtoreal");
+
+                case "Integer_To_Real":
+                    return builder.BuildSIToFP(args[0], LLVMTypeRef.Double, "i2r");
+
+                case "Real_To_Integer":
+                    return builder.BuildFPToSI(args[0], LLVMTypeRef.Int32, "r2i");
+
+                default:
+                    throw new Exception($"Neznámá konverzní funkce: {funcCall.Name}");
+            }
+        }
+
+        private LLVMValueRef GenerateMathCall(FunctionCall funcCall)
+        {
+            if (!declaredFunctions.TryGetValue(funcCall.Name, out var mathFunc))
+            {
+                throw new Exception($"Matematická funkce '{funcCall.Name}' nebyla deklarována");
+            }
+
+            var args = funcCall.Arguments.Select(GenerateExpression).ToArray();
+
+            // Konvertovat argumenty na double pokud jsou integer
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i].TypeOf.Kind == LLVMTypeKind.LLVMIntegerTypeKind)
+                {
+                    args[i] = builder.BuildSIToFP(args[i], LLVMTypeRef.Double, "mathargtofp");
+                }
+            }
+
+            return builder.BuildCall2(mathFunc.Type, mathFunc.Function, args, "mathcall");
         }
 
         private LLVMValueRef GenerateBinaryExpression(BinaryExpression binary)
@@ -761,12 +979,7 @@ namespace BTEJA_SemestralniPrace
 
                 case BinaryOperator.Power:
                     // Pro mocninu použijeme pow funkci
-                    var powFunc = module.GetNamedFunction("pow");
-                    if (powFunc.Handle == IntPtr.Zero)
-                    {
-                        var powType = LLVMTypeRef.CreateFunction(LLVMTypeRef.Double, new[] { LLVMTypeRef.Double, LLVMTypeRef.Double });
-                        powFunc = module.AddFunction("pow", powType);
-                    }
+                    var powFunc = declaredFunctions["pow"].Function;
 
                     if (!isFloat)
                     {
@@ -848,13 +1061,65 @@ namespace BTEJA_SemestralniPrace
 
             if (variable.ArrayIndices != null && variable.ArrayIndices.Count > 0)
             {
-                // Přístup k poli - budeme řešit v dalším kroku
-                var indices = new List<LLVMValueRef> { LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false) };
-                indices.AddRange(variable.ArrayIndices.Select(GenerateExpression));
-                return builder.BuildGEP2(value.TypeOf.ElementType, value, indices.ToArray(), "arrayidx");
+                return GetArrayElementPointer(variable, value);
             }
 
             return value;
+        }
+
+        private LLVMValueRef GetArrayElementPointer(Variable variable, LLVMValueRef arrayPtr)
+        {
+            // Zjistit typ pole
+            var arrayPtrType = arrayPtr.TypeOf;
+            var arrayType = arrayPtrType.ElementType;
+
+            // Najít definici pole pro získání rozsahů
+            ArrayTypeDefinition arrayDef = null;
+
+            // Hledat v namedTypes
+            foreach (var kvp in arrayDefinitions)
+            {
+                if (namedTypes.TryGetValue(kvp.Key, out var type) && type.Handle == arrayType.Handle)
+                {
+                    arrayDef = kvp.Value;
+                    break;
+                }
+            }
+
+            if (arrayDef == null)
+            {
+                // Fallback - použít jednoduchý přístup bez úpravy indexů
+                var indices = new List<LLVMValueRef> {
+                    LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false)
+                };
+                indices.AddRange(variable.ArrayIndices.Select(GenerateExpression));
+                return builder.BuildGEP2(arrayType, arrayPtr, indices.ToArray(), "arrayidx");
+            }
+
+            // Vytvoření indexů s úpravou na 0-based
+            var adjustedIndices = new List<LLVMValueRef> {
+                LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, 0, false)
+            };
+
+            for (int i = 0; i < variable.ArrayIndices.Count; i++)
+            {
+                var index = GenerateExpression(variable.ArrayIndices[i]);
+                var range = arrayDef.IndexRanges[i];
+
+                // Ada používá custom rozsahy (např. 1..10), musíme převést na 0-based
+                if (range.Lower is IntegerLiteral lowerLit)
+                {
+                    if (lowerLit.Value != 0)
+                    {
+                        var lowerBound = LLVMValueRef.CreateConstInt(LLVMTypeRef.Int32, (ulong)lowerLit.Value, true);
+                        index = builder.BuildSub(index, lowerBound, "adjusted_idx");
+                    }
+                }
+
+                adjustedIndices.Add(index);
+            }
+
+            return builder.BuildGEP2(arrayType, arrayPtr, adjustedIndices.ToArray(), "arrayptr");
         }
 
         private LLVMTypeRef GetVariableType(Variable variable)
