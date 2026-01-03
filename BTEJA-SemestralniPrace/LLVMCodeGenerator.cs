@@ -637,9 +637,6 @@ namespace BTEJA_SemestralniPrace
                 return;
             }
 
-            // ZMĚNA: Speciální zpracování pro Main proceduru - musí být void Main(void)
-            bool isMainProcedure = subprogram.Name == "Main" && !(subprogram is FunctionDeclaration);
-
             // Určit návratový typ
             LLVMTypeRef returnType;
             if (subprogram is FunctionDeclaration func)
@@ -657,26 +654,17 @@ namespace BTEJA_SemestralniPrace
 
             // Vytvořit typy parametrů
             var paramTypes = new List<LLVMTypeRef>();
-
-            // ZMĚNA: Main procedura nesmí mít parametry (kvůli main_wrapper.c)
-            if (isMainProcedure && subprogram.Parameters.Count > 0)
+            foreach (var param in subprogram.Parameters)
             {
-                AddWarning($"Main procedura nemůže mít parametry, parametry budou ignorovány", subprogram);
-            }
-            else
-            {
-                foreach (var param in subprogram.Parameters)
+                if (!TryGetLLVMType(param.Type, out var paramType, subprogram))
                 {
-                    if (!TryGetLLVMType(param.Type, out var paramType, subprogram))
-                    {
-                        ExitScope();
-                        return;
-                    }
+                    ExitScope();
+                    return;
+                }
 
-                    foreach (var _ in param.Names)
-                    {
-                        paramTypes.Add(paramType);
-                    }
+                foreach (var _ in param.Names)
+                {
+                    paramTypes.Add(paramType);
                 }
             }
 
@@ -700,29 +688,26 @@ namespace BTEJA_SemestralniPrace
             var entryBlock = function.AppendBasicBlock("entry");
             builder.PositionAtEnd(entryBlock);
 
-            // ZMĚNA: Alokovat parametry pouze pokud to není Main procedura
-            if (!isMainProcedure)
+            // Alokovat parametry
+            int paramIndex = 0;
+            foreach (var param in subprogram.Parameters)
             {
-                int paramIndex = 0;
-                foreach (var param in subprogram.Parameters)
+                if (!TryGetLLVMType(param.Type, out var paramType, subprogram))
                 {
-                    if (!TryGetLLVMType(param.Type, out var paramType, subprogram))
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    foreach (var name in param.Names)
-                    {
-                        var paramValue = function.GetParam((uint)paramIndex);
-                        paramValue.Name = name;
+                foreach (var name in param.Names)
+                {
+                    var paramValue = function.GetParam((uint)paramIndex);
+                    paramValue.Name = name;
 
-                        // Alokovat prostor pro parametr a uložit hodnotu
-                        var alloca = builder.BuildAlloca(paramType, name);
-                        builder.BuildStore(paramValue, alloca);
-                        AddVariable(name, alloca, subprogram);
+                    // Alokovat prostor pro parametr a uložit hodnotu
+                    var alloca = builder.BuildAlloca(paramType, name);
+                    builder.BuildStore(paramValue, alloca);
+                    AddVariable(name, alloca, subprogram);
 
-                        paramIndex++;
-                    }
+                    paramIndex++;
                 }
             }
 
