@@ -27,6 +27,9 @@ namespace BTEJA_SemestralniPrace
         public List<CompilerError> Errors { get; } = new List<CompilerError>();
         public List<CompilerWarning> Warnings { get; } = new List<CompilerWarning>();
 
+        // NOVÉ: Sledování hlavní entry point procedury
+        public string MainProcedureName { get; private set; }
+
         public LLVMCodeGenerator(string moduleName)
         {
             module = LLVMModuleRef.CreateWithName(moduleName);
@@ -604,6 +607,12 @@ namespace BTEJA_SemestralniPrace
                     return;
                 }
 
+                // Uložit název hlavní procedury pro main_wrapper
+                if (program.MainProcedure != null)
+                {
+                    MainProcedureName = program.MainProcedure.Name;
+                }
+
                 GenerateSubprogram(program.MainProcedure);
 
                 // Závěrečná validace
@@ -652,8 +661,9 @@ namespace BTEJA_SemestralniPrace
                 returnType = LLVMTypeRef.Void;
             }
 
-            // Vytvořit typy parametrů
+            // Vytvořit typy parametrů - univerzálně bez speciálních případů
             var paramTypes = new List<LLVMTypeRef>();
+
             foreach (var param in subprogram.Parameters)
             {
                 if (!TryGetLLVMType(param.Type, out var paramType, subprogram))
@@ -688,7 +698,7 @@ namespace BTEJA_SemestralniPrace
             var entryBlock = function.AppendBasicBlock("entry");
             builder.PositionAtEnd(entryBlock);
 
-            // Alokovat parametry
+            // Alokovat parametry univerzálně
             int paramIndex = 0;
             foreach (var param in subprogram.Parameters)
             {
@@ -1570,7 +1580,7 @@ namespace BTEJA_SemestralniPrace
                 case BinaryOperator.GreaterOrEqual:
                     return isFloat
                         ? builder.BuildFCmp(LLVMRealPredicate.LLVMRealOGE, left, right, "getmp")
-                        : builder.BuildICmp(LLVMIntPredicate.LLVMIntSGE, left, right, "getmp");
+                        : builder.BuildICmp(LLVMIntPredicate.LLVMIntSGE, right, right, "getmp");
 
                 case BinaryOperator.And:
                     return builder.BuildAnd(left, right, "andtmp");

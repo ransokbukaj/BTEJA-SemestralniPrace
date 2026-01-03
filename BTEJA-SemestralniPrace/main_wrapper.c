@@ -1,20 +1,33 @@
 ﻿/**
- * Main Wrapper for Ada Compiler
- * Poskytuje C entry point, který volá Ada Main proceduru
+ * Universal Main Wrapper for Ada Compiler
+ *
+ * Tento wrapper automaticky volá hlavní proceduru Ada programu bez ohledu na její název.
+ * Název procedury je definován v MAIN_PROCEDURE_NAME během kompilace.
  */
 
 #include <stdio.h>
 #include <stdlib.h>
 
-// ============================================================================
-// DEKLARACE EXTERNÍ Ada Main PROCEDURY
-// ============================================================================
+ // ============================================================================
+ // KONFIGURACE - NÁZEV HLAVNÍ PROCEDURY
+ // ============================================================================
 
-/**
- * Deklarace Main procedury z Ada programu
- * Tato procedura je generována LLVM code generatorem jako "Main"
- */
-extern void Main(void);
+ /**
+  * Název hlavní procedury je definován kompilátorem pomocí -D flag
+  * Příklad: -DMAIN_PROCEDURE_NAME=Matrix_Operations
+  *
+  * Pokud není definován, použije se výchozí "Main"
+  */
+#ifndef MAIN_PROCEDURE_NAME
+#define MAIN_PROCEDURE_NAME Main
+#endif
+
+  // Pomocné makro pro vytvoření deklarace funkce
+#define DECLARE_MAIN_PROC(name) extern void name(void)
+#define CALL_MAIN_PROC(name) name()
+
+// Deklarace hlavní procedury s dynamickým názvem
+DECLARE_MAIN_PROC(MAIN_PROCEDURE_NAME);
 
 // ============================================================================
 // C ENTRY POINT
@@ -25,7 +38,7 @@ extern void Main(void);
  *
  * Tento wrapper:
  * 1. Inicializuje C runtime prostředí
- * 2. Volá Ada Main proceduru
+ * 2. Volá Ada hlavní proceduru (s libovolným názvem)
  * 3. Vrací exit code
  *
  * @param argc Počet argumentů příkazové řádky
@@ -34,12 +47,11 @@ extern void Main(void);
  */
 int main(int argc, char* argv[]) {
     // Potenciální budoucí použití command-line argumentů
-    // Pro budoucí rozšíření Ada runtime můžeme předat argc/argv
     (void)argc;  // Suppress unused warning
     (void)argv;  // Suppress unused warning
 
-    // Volání Ada Main procedury
-    Main();
+    // Volání Ada hlavní procedury (název je definován při kompilaci)
+    CALL_MAIN_PROC(MAIN_PROCEDURE_NAME);
 
     // Úspěšné ukončení
     return 0;
